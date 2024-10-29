@@ -44,3 +44,4 @@ Thumbs.db
 *.log
 .coverage
 htmlcov/
+all_code.txt
