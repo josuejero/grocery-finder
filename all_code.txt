@@ -1,0 +1,891 @@
+
+
+This is a website I am working on. Please analyze the project structure, errors, and code carefully:
+
+.
+├── README.md
+├── all_code.txt
+├── frontend
+├── infrastructure
+│   ├── docker-compose.yml
+│   └── terraform
+├── problem.py
+├── pytest.ini
+├── requirements-dev.txt
+└── services
+    ├── api_gateway
+    │   ├── Dockerfile
+    │   ├── __pycache__
+    │   │   ├── main.cpython-313.pyc
+    │   │   └── test_main.cpython-313-pytest-8.3.3.pyc
+    │   ├── api_gateway.log
+    │   ├── main.py
+    │   ├── requirements.txt
+    │   ├── test_api_gateway.log
+    │   └── test_main.py
+    ├── auth_service
+    │   ├── Dockerfile
+    │   └── requirements.txt
+    ├── price_service
+    │   ├── Dockerfile
+    │   └── requirements.txt
+    └── user_service
+        ├── Dockerfile
+        └── requirements.txt
+
+10 directories, 20 files
+
+
+================================================================================
+File: README.md
+================================================================================
+
+
+
+================================================================================
+File: problem.py
+================================================================================
+
+import os
+import subprocess
+import pyperclip
+import shutil
+import sys
+
+# Path to the output file
+output_file_path = "all_code.txt"
+
+# Maximum allowed file size in bytes (500 MB)
+MAX_FILE_SIZE = 500 * 1024 * 1024  # 500 MB in bytes
+
+try:
+    # Initialize the output file
+    with open(output_file_path, "w") as file:
+        pass
+except IOError as e:
+    print(f"Error initializing '{output_file_path}': {e}")
+    sys.exit(1)
+
+# Function to get multi-line input with a special end keyword
+def get_multiline_input(prompt):
+    print(prompt)
+    print("Type 'END' on a new line to finish.")
+    lines = []
+    try:
+        while True:
+            line = input()
+            if line.strip().upper() == 'END':
+                break
+            lines.append(line)
+    except KeyboardInterrupt:
+        print("\nInput interrupted by user.")
+        sys.exit(1)
+    except EOFError:
+        print("\nEnd of file reached unexpectedly.")
+        sys.exit(1)
+    return "\n".join(lines)
+
+# Get user input for the problem description
+problem_message = get_multiline_input("Enter the problem with the code:")
+
+try:
+    # Write the problem message and introductory text to the output file
+    with open(output_file_path, "a") as file:
+        file.write(f"{problem_message}\n\n")
+        file.write("This is a website I am working on. Please analyze the project structure, errors, and code carefully:\n\n")
+except IOError as e:
+    print(f"Error writing to '{output_file_path}': {e}")
+    sys.exit(1)
+
+# Check if 'tree' command is available
+if shutil.which("tree") is None:
+    print("Error: 'tree' command is not available. Please install it and try again.")
+    sys.exit(1)
+
+# Append the output of the tree command to the output file
+try:
+    tree_output = subprocess.run(
+        ["tree", "-I", ".next|node_modules|venv|.git"],
+        capture_output=True,
+        text=True,
+        check=True
+    )
+    with open(output_file_path, "a") as file:
+        file.write(tree_output.stdout)
+        file.write("\n")
+except subprocess.CalledProcessError as e:
+    print(f"Error executing 'tree' command: {e}")
+    sys.exit(1)
+except IOError as e:
+    print(f"Error writing to '{output_file_path}': {e}")
+    sys.exit(1)
+
+# Define directories and files to exclude
+exclude_dirs = {'node_modules', '.next', 'venv', '.git', '__pycache__'}
+exclude_files = {'package-lock.json', output_file_path}
+
+# Define allowed file extensions and filenames
+allowed_extensions = {'.md', '.json', '.mjs', '.js', '.jsx', '.ts', '.tsx', '.css', '.module.css', '.scss', '.txt', '.yml', '.yaml', '.tf', '.py'}
+allowed_filenames = {'Dockerfile'}
+
+try:
+    for root, dirs, files in os.walk('.'):
+        # Skip excluded directories
+        dirs[:] = [d for d in dirs if d not in exclude_dirs]
+
+        for file in files:
+            if file in exclude_files:
+                continue
+            file_path_full = os.path.join(root, file)
+            ext = os.path.splitext(file)[1]
+            if ext in allowed_extensions or file in allowed_filenames:
+                try:
+                    with open(file_path_full, 'r') as f:
+                        content = f.read()
+                    relative_path = os.path.relpath(file_path_full, '.')
+                    with open(output_file_path, 'a') as outfile:
+                        outfile.write('\n')
+                        outfile.write('=' * 80 + '\n')
+                        outfile.write(f'File: {relative_path}\n')
+                        outfile.write('=' * 80 + '\n\n')
+                        outfile.write(content)
+                        outfile.write('\n')
+                except Exception as e:
+                    print(f"Error reading file '{file_path_full}': {e}")
+except Exception as e:
+    print(f"Error during directory traversal: {e}")
+    sys.exit(1)
+
+# Check the size of the output file
+try:
+    file_size = os.path.getsize(output_file_path)
+except OSError as e:
+    print(f"Error getting size of '{output_file_path}': {e}")
+    sys.exit(1)
+
+# Handle large file sizes
+if file_size > MAX_FILE_SIZE:
+    print(f"Warning: The file '{output_file_path}' exceeds 500 MB ({file_size / (1024 * 1024):.2f} MB).")
+    print("Copying such a large amount of data to the clipboard may cause performance issues.")
+    user_choice = input("Do you want to proceed with copying to clipboard? (y/N): ").strip().lower()
+    if user_choice != 'y':
+        print("Skipping copying to clipboard.")
+        print(f"All steps completed, '{output_file_path}' has been updated.")
+        sys.exit(0)
+    else:
+        print("Proceeding to copy to clipboard. This may take some time.")
+else:
+    print(f"The file size of '{output_file_path}' is {(file_size / (1024 * 1024)):.2f} MB.")
+
+# Read the contents of the output file
+try:
+    with open(output_file_path, "r") as file:
+        file_content = file.read()
+except IOError as e:
+    print(f"Error reading from '{output_file_path}': {e}")
+    sys.exit(1)
+
+# Copy the contents to the clipboard
+try:
+    pyperclip.copy(file_content)
+except pyperclip.PyperclipException as e:
+    print(f"Error copying content to clipboard: {e}")
+    print("Proceeding without copying to clipboard.")
+except MemoryError:
+    print("MemoryError: The file is too large to copy to the clipboard.")
+    print("Proceeding without copying to clipboard.")
+
+print(f"All steps completed, '{output_file_path}' has been updated, and its contents have been copied to the clipboard.")
+
+
+================================================================================
+File: requirements-dev.txt
+================================================================================
+
+fastapi>=0.68.0
+uvicorn>=0.15.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+pytest>=6.2.5
+black>=21.7b0
+isort>=5.9.3
+flake8>=3.9.2
+motor>=2.5.1
+pydantic>=1.8.2
+python-multipart>=0.0.5
+python-dotenv>=0.19.0
+
+================================================================================
+File: .pytest_cache/README.md
+================================================================================
+
+# pytest cache directory #
+
+This directory contains data from the pytest's cache plugin,
+which provides the `--lf` and `--ff` options, as well as the `cache` fixture.
+
+**Do not** commit this to version control.
+
+See [the docs](https://docs.pytest.org/en/stable/how-to/cache.html) for more information.
+
+
+================================================================================
+File: infrastructure/docker-compose.yml
+================================================================================
+
+version: '3.8'
+
+services:
+  api_gateway:
+    build:
+      context: ../services/api_gateway
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - AUTH_SERVICE_URL=${AUTH_SERVICE_URL}
+      - USER_SERVICE_URL=${USER_SERVICE_URL}
+      - PRICE_SERVICE_URL=${PRICE_SERVICE_URL}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - JWT_ALGORITHM=${JWT_ALGORITHM}
+      - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE}
+      - LOG_LEVEL=${LOG_LEVEL}
+    depends_on:
+      - auth_service
+      - user_service
+      - price_service
+
+  auth_service:
+    build:
+      context: ../services/auth_service
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8000"
+    environment:
+      - MONGODB_URL=${MONGODB_URL}
+      - MONGODB_DATABASE=${MONGODB_DATABASE}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - JWT_ALGORITHM=${JWT_ALGORITHM}
+      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=${JWT_ACCESS_TOKEN_EXPIRE_MINUTES}
+      - LOG_LEVEL=${LOG_LEVEL}
+    depends_on:
+      - mongodb
+
+  user_service:
+    build:
+      context: ../services/user_service
+      dockerfile: Dockerfile
+    ports:
+      - "8002:8000"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_HOST=${POSTGRES_HOST}
+      - POSTGRES_PORT=${POSTGRES_PORT}
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      - LOG_LEVEL=${LOG_LEVEL}
+    depends_on:
+      - postgres
+
+  price_service:
+    build:
+      context: ../services/price_service
+      dockerfile: Dockerfile
+    ports:
+      - "8003:8000"
+    environment:
+      - MONGODB_URL=${MONGODB_URL}
+      - MONGODB_DATABASE=${MONGODB_DATABASE}
+      - LOG_LEVEL=${LOG_LEVEL}
+    depends_on:
+      - mongodb
+
+  mongodb:
+    image: mongo:5.0
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    environment:
+      - MONGO_INITDB_DATABASE=${MONGODB_DATABASE}
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/${MONGODB_DATABASE} --quiet
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  postgres:
+    image: postgres:14
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  mongodb_data:
+    name: grocery_finder_mongodb_data
+  postgres_data:
+    name: grocery_finder_postgres_data
+
+networks:
+  default:
+    name: grocery_finder_network
+
+================================================================================
+File: services/api_gateway/requirements.txt
+================================================================================
+
+fastapi>=0.68.0
+uvicorn>=0.15.0
+httpx>=0.23.0
+python-jose[cryptography]>=3.3.0
+python-multipart>=0.0.5
+pydantic>=1.8.2
+redis>=4.2.0
+prometheus-client>=0.14.0
+pytest>=6.2.5
+pytest-asyncio>=0.18.0
+pytest-mock>=3.6.1
+
+================================================================================
+File: services/api_gateway/Dockerfile
+================================================================================
+
+# Use Python 3.9 slim image as base
+FROM python:3.9-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first to leverage Docker cache
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of the application
+COPY . .
+
+# Expose port 8000
+EXPOSE 8000
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# Run the application
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+================================================================================
+File: services/api_gateway/main.py
+================================================================================
+
+import httpx
+import logging
+import sys
+import os
+from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import OAuth2PasswordBearer
+from typing import Dict, Optional
+from datetime import datetime, UTC  # Import UTC for timezone-aware timestamps
+import jwt
+from pydantic import BaseModel
+import redis.asyncio as redis
+from prometheus_client import Counter, Histogram
+import time
+from functools import lru_cache
+import traceback
+
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('api_gateway.log'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# Initialize FastAPI app
+app = FastAPI(title="Grocery Finder API Gateway")
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Environment variables
+AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL", "http://auth_service:8000")
+USER_SERVICE_URL = os.getenv("USER_SERVICE_URL", "http://user_service:8000")
+PRICE_SERVICE_URL = os.getenv("PRICE_SERVICE_URL", "http://price_service:8000")
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "default-secret-key")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "60"))
+
+# Metrics
+REQUEST_COUNT = Counter("http_requests_total", "Total HTTP requests", ["method", "endpoint"])
+REQUEST_LATENCY = Histogram("http_request_duration_seconds", "HTTP request latency")
+
+# OAuth2 scheme
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+class LoginCredentials(BaseModel):
+    username: str
+    password: str
+
+class ServiceResponse(BaseModel):
+    status: str
+    data: Optional[Dict] = None
+    error: Optional[str] = None
+
+# Redis client factory
+@lru_cache()
+def get_redis_client():
+    return redis.from_url("redis://localhost:6379", encoding="utf-8", decode_responses=True)
+
+# Rate limiting middleware
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    logger.debug(f"Processing request: {request.method} {request.url.path}")
+
+    if getattr(app.state, "testing", False):
+        logger.debug("Testing mode detected, skipping rate limiting")
+        return await call_next(request)
+
+    try:
+        redis_client = get_redis_client()
+        client_ip = request.client.host
+        key = f"rate_limit:{client_ip}"
+
+        requests = await redis_client.incr(key)
+        if requests == 1:
+            await redis_client.expire(key, 60)
+
+        if requests > RATE_LIMIT_PER_MINUTE:
+            raise HTTPException(
+                status_code=429,
+                detail="Rate limit exceeded. Please try again later."
+            )
+
+        response = await call_next(request)
+        return response
+    except redis.ConnectionError:
+        return await call_next(request)
+
+# JWT validation
+async def validate_token(token: str = Depends(oauth2_scheme)) -> dict:
+    try:
+        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        return payload
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token has expired")
+    except jwt.JWTError:
+        raise HTTPException(status_code=401, detail="Could not validate token")
+
+# Health check endpoint
+@app.get("/health")
+async def health_check():
+    logger.debug("Health check requested")
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now(UTC).isoformat(),  # Using timezone-aware timestamp
+        "version": "1.0.0"
+    }
+
+# Authentication routes
+@app.post("/auth/login")
+async def login(credentials: LoginCredentials):
+    logger.debug(f"Login attempt for user: {credentials.username}")
+    REQUEST_COUNT.labels(method="POST", endpoint="/auth/login").inc()
+
+    try:
+        with REQUEST_LATENCY.time():
+            async with httpx.AsyncClient() as client:
+                logger.debug(f"Forwarding login request to auth service: {AUTH_SERVICE_URL}/login")
+                response = await client.post(
+                    f"{AUTH_SERVICE_URL}/login",
+                    json=credentials.model_dump()
+                )
+
+                response_data = response.json()
+                logger.debug(f"Auth service response: {response.status_code}")
+
+                # Forward the status code and response from the auth service
+                if response.status_code != 200:
+                    raise HTTPException(
+                        status_code=response.status_code,
+                        detail=response_data.get("detail", "Authentication failed")
+                    )
+
+                return response_data
+
+    except httpx.RequestError as e:
+        logger.error(f"Auth service request failed: {str(e)}")
+        raise HTTPException(status_code=503, detail="Auth service unavailable")
+    except HTTPException as e:
+        logger.warning(f"Authentication failed: {str(e.detail)}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error during login: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+================================================================================
+File: services/api_gateway/test_main.py
+================================================================================
+
+import pytest
+import logging
+import sys
+import os
+import traceback
+from fastapi.testclient import TestClient
+from unittest.mock import AsyncMock, patch, MagicMock
+import jwt
+import time
+import httpx
+from pathlib import Path
+from main import app, validate_token, LoginCredentials
+
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('test_api_gateway.log'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# Set testing flag
+app.state.testing = True
+
+# Create test client
+client = TestClient(app)
+
+# Mock environment variables
+@pytest.fixture(autouse=True)
+def mock_env_vars(monkeypatch):
+    logger.debug("Setting up mock environment variables")
+    try:
+        monkeypatch.setenv("JWT_SECRET_KEY", "test_secret")
+        monkeypatch.setenv("AUTH_SERVICE_URL", "http://auth:8000")
+        monkeypatch.setenv("USER_SERVICE_URL", "http://users:8000")
+        monkeypatch.setenv("PRICE_SERVICE_URL", "http://prices:8000")
+        monkeypatch.setenv("RATE_LIMIT_PER_MINUTE", "60")
+        logger.debug("Mock environment variables set successfully")
+    except Exception as e:
+        logger.error(f"Failed to set mock environment variables: {str(e)}")
+        raise
+
+# Redis mock setup
+@pytest.fixture(autouse=True)
+def mock_redis():
+    logger.debug("Setting up mock Redis client")
+    try:
+        redis_mock = AsyncMock()
+        redis_mock.incr.return_value = 1
+        redis_mock.expire.return_value = True
+
+        with patch('main.get_redis_client', return_value=redis_mock):
+            logger.debug("Mock Redis client setup complete")
+            yield redis_mock
+    except Exception as e:
+        logger.error(f"Failed to setup mock Redis: {str(e)}")
+        raise
+
+# Test health check endpoint
+def test_health_check():
+    logger.debug("Running health check test")
+    try:
+        response = client.get("/health")
+        logger.debug(f"Health check response: {response.json()}")
+        assert response.status_code == 200
+        assert "status" in response.json()
+        assert response.json()["status"] == "healthy"
+        assert "timestamp" in response.json()
+        logger.debug("Health check test passed")
+    except Exception as e:
+        logger.error(f"Health check test failed: {str(e)}")
+        raise
+
+# Test login endpoint with successful login
+def test_login_success():
+    logger.debug("Running login success test")
+    try:
+        test_credentials = LoginCredentials(username="testuser", password="testpass")
+
+        # Mock successful response from auth service
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"access_token": "test_token"}
+
+        with patch('httpx.AsyncClient') as mock_client:
+            mock_client.return_value.__aenter__.return_value.post.return_value = mock_response
+
+            response = client.post("/auth/login", json=test_credentials.model_dump())
+            logger.debug(f"Login response: {response.json()}")
+
+            assert response.status_code == 200
+            assert "access_token" in response.json()
+            logger.debug("Login success test passed")
+
+    except Exception as e:
+        logger.error(f"Login success test failed: {str(e)}")
+        raise
+
+# Test login endpoint with failed login
+def test_login_failure():
+    logger.debug("Running login failure test")
+    try:
+        test_credentials = LoginCredentials(username="testuser", password="wrongpass")
+
+        # Mock failed response from auth service
+        mock_response = MagicMock()
+        mock_response.status_code = 401
+        mock_response.json.return_value = {"detail": "Invalid credentials"}
+
+        with patch('httpx.AsyncClient') as mock_client:
+            mock_client.return_value.__aenter__.return_value.post.return_value = mock_response
+
+            response = client.post("/auth/login", json=test_credentials.model_dump())
+            logger.debug(f"Login failure response: {response.json()}")
+
+            assert response.status_code == 401
+            assert "detail" in response.json()
+            assert response.json()["detail"] == "Invalid credentials"
+            logger.debug("Login failure test passed")
+
+    except Exception as e:
+        logger.error(f"Login failure test failed: {str(e)}")
+        raise
+
+# Test login endpoint with auth service unavailable
+def test_login_service_unavailable():
+    logger.debug("Running login service unavailable test")
+    try:
+        test_credentials = LoginCredentials(username="testuser", password="testpass")
+
+        with patch('httpx.AsyncClient') as mock_client:
+            mock_client.return_value.__aenter__.return_value.post.side_effect = httpx.RequestError("Connection failed")
+
+            response = client.post("/auth/login", json=test_credentials.model_dump())
+            logger.debug(f"Service unavailable response: {response.json()}")
+
+            assert response.status_code == 503
+            assert "detail" in response.json()
+            assert response.json()["detail"] == "Auth service unavailable"
+            logger.debug("Login service unavailable test passed")
+
+    except Exception as e:
+        logger.error(f"Login service unavailable test failed: {str(e)}")
+        raise
+
+if __name__ == "__main__":
+    pytest.main(["-v", "--log-cli-level=DEBUG"])
+
+================================================================================
+File: services/api_gateway/.pytest_cache/README.md
+================================================================================
+
+# pytest cache directory #
+
+This directory contains data from the pytest's cache plugin,
+which provides the `--lf` and `--ff` options, as well as the `cache` fixture.
+
+**Do not** commit this to version control.
+
+See [the docs](https://docs.pytest.org/en/stable/how-to/cache.html) for more information.
+
+
+================================================================================
+File: services/user_service/requirements.txt
+================================================================================
+
+# User Service dependencies
+fastapi>=0.68.0
+uvicorn>=0.15.0
+sqlalchemy>=1.4.23
+psycopg2-binary>=2.9.1
+alembic>=1.7.1
+pydantic>=1.8.2
+python-dotenv>=0.19.0
+passlib[bcrypt]>=1.7.4
+python-jose[cryptography]>=3.3.0
+python-multipart>=0.0.5
+emails>=0.6
+asyncpg>=0.25.0  # Async PostgreSQL driver
+sqlalchemy-utils>=0.38.2
+
+================================================================================
+File: services/user_service/Dockerfile
+================================================================================
+
+# Use Python 3.9 slim image as base
+FROM python:3.9-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first to leverage Docker cache
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of the application
+COPY . .
+
+# Expose port 8000
+EXPOSE 8000
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# Run the application
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+================================================================================
+File: services/auth_service/requirements.txt
+================================================================================
+
+# Auth Service dependencies
+fastapi>=0.68.0
+uvicorn>=0.15.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+pydantic>=1.8.2
+python-multipart>=0.0.5
+python-dotenv>=0.19.0
+motor>=2.5.1  # MongoDB async driver
+bcrypt>=3.2.0
+email-validator>=1.1.3
+aioredis>=2.0.0  # For session management
+
+================================================================================
+File: services/auth_service/Dockerfile
+================================================================================
+
+# Use Python 3.9 slim image as base
+FROM python:3.9-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first to leverage Docker cache
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of the application
+COPY . .
+
+# Expose port 8000
+EXPOSE 8000
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# Run the application
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+================================================================================
+File: services/price_service/requirements.txt
+================================================================================
+
+# Price Service dependencies
+fastapi>=0.68.0
+uvicorn>=0.15.0
+motor>=2.5.1
+pydantic>=1.8.2
+python-dotenv>=0.19.0
+pandas>=1.3.0  # For price analysis
+numpy>=1.21.0  # For numerical computations
+tensorflow>=2.6.0  # For ML price predictions
+scikit-learn>=0.24.2  # For data preprocessing
+aiohttp>=3.8.1  # For async HTTP requests
+beautifulsoup4>=4.9.3  # For web scraping
+requests>=2.26.0  # For HTTP requests
+
+================================================================================
+File: services/price_service/Dockerfile
+================================================================================
+
+# Use Python 3.9 slim image as base
+FROM python:3.9-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first to leverage Docker cache
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of the application
+COPY . .
+
+# Expose port 8000
+EXPOSE 8000
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# Run the application
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

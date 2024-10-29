@@ -1,0 +1,20 @@
+# Environment variables
+.env
+
+# Database volumes
+mongodb_data/
+postgres_data/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
