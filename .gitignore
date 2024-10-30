@@ -45,3 +45,4 @@ Thumbs.db
 .coverage
 htmlcov/
 all_code.txt
+credential_tests.log

@@ -92,7 +92,6 @@ allowed_extensions = {
     ".ini",
     ".cjg",
     ".gitignore",
-    ".log",
     "",
 }
 allowed_filenames = {"Dockerfile"}
