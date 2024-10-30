@@ -88,6 +88,12 @@ allowed_extensions = {
     ".yaml",
     ".tf",
     ".py",
+    ".env",
+    ".ini",
+    ".cjg",
+    ".gitignore",
+    ".log",
+    "",
 }
 allowed_filenames = {"Dockerfile"}
 
