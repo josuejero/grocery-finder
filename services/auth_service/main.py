@@ -1,7 +1,12 @@
 import logging
 import os
 import sys
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
+import datetime as dt
+try:
+    from datetime import UTC
+except ImportError:
+    UTC = dt.timezone.utc
 from typing import Optional
 
 import jwt

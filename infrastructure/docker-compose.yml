@@ -1,99 +1,207 @@
-version: '3.8'
+x-common-variables: &common-variables
+  PYTHONUNBUFFERED: 1
+  PYTHONDONTWRITEBYTECODE: 1
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+x-service-common: &service-common
+  restart: unless-stopped
+  networks:
+    - grocery_finder_network
+  deploy:
+    resources:
+      limits:
+        cpus: '0.50'
+        memory: 512M
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "10m"
+      max-file: "3"
 
 services:
   api_gateway:
+    <<: *service-common
+    container_name: grocery_finder_api_gateway
     build:
       context: ../services/api_gateway
       dockerfile: Dockerfile
+      args:
+        PYTHON_VERSION: "3.12"
+    working_dir: /app
     ports:
       - "8000:8000"
     environment:
-      - AUTH_SERVICE_URL=${AUTH_SERVICE_URL}
-      - USER_SERVICE_URL=${USER_SERVICE_URL}
-      - PRICE_SERVICE_URL=${PRICE_SERVICE_URL}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
-      - JWT_ALGORITHM=${JWT_ALGORITHM}
-      - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE}
-      - LOG_LEVEL=${LOG_LEVEL}
+      <<: *common-variables
+      AUTH_SERVICE_URL: http://auth_service:8000
+      USER_SERVICE_URL: http://user_service:8000
+      PRICE_SERVICE_URL: http://price_service:8000
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE}
+      REDIS_URL: redis://redis:6379
+    volumes:
+      - ../services/api_gateway:/app:ro
     depends_on:
-      - auth_service
-      - user_service
-      - price_service
+      redis:
+        condition: service_healthy
+      auth_service:
+        condition: service_healthy
+      user_service:
+        condition: service_healthy
+      price_service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   auth_service:
+    <<: *service-common
+    container_name: grocery_finder_auth_service
     build:
       context: ../services/auth_service
       dockerfile: Dockerfile
+      args:
+        PYTHON_VERSION: "3.12"
+    working_dir: /app
     ports:
       - "8001:8000"
     environment:
-      - MONGODB_URL=${MONGODB_URL}
-      - MONGODB_DATABASE=${MONGODB_DATABASE}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
-      - JWT_ALGORITHM=${JWT_ALGORITHM}
-      - JWT_ACCESS_TOKEN_EXPIRE_MINUTES=${JWT_ACCESS_TOKEN_EXPIRE_MINUTES}
-      - LOG_LEVEL=${LOG_LEVEL}
+      <<: *common-variables
+      MONGODB_URL: mongodb://mongodb:27017/${MONGODB_DATABASE}?retryWrites=true&w=majority&maxPoolSize=50&minPoolSize=10&maxConnecting=50&maxIdleTimeMS=30000
+      MONGODB_DATABASE: ${MONGODB_DATABASE}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES}
+      BCRYPT_SALT_ROUNDS: ${BCRYPT_SALT_ROUNDS:-12}
+    volumes:
+      - ../services/auth_service:/app:ro
     depends_on:
-      - mongodb
+      mongodb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   user_service:
+    <<: *service-common
+    container_name: grocery_finder_user_service
     build:
       context: ../services/user_service
       dockerfile: Dockerfile
+      args:
+        PYTHON_VERSION: "3.12"
+    working_dir: /app
     ports:
       - "8002:8000"
     environment:
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_DB=${POSTGRES_DB}
-      - POSTGRES_HOST=${POSTGRES_HOST}
-      - POSTGRES_PORT=${POSTGRES_PORT}
-      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
-      - LOG_LEVEL=${LOG_LEVEL}
+      <<: *common-variables
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    volumes:
+      - ../services/user_service:/app:ro
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   price_service:
+    <<: *service-common
+    container_name: grocery_finder_price_service
     build:
       context: ../services/price_service
       dockerfile: Dockerfile
+      args:
+        PYTHON_VERSION: "3.12"
+    working_dir: /app
     ports:
       - "8003:8000"
     environment:
-      - MONGODB_URL=${MONGODB_URL}
-      - MONGODB_DATABASE=${MONGODB_DATABASE}
-      - LOG_LEVEL=${LOG_LEVEL}
+      <<: *common-variables
+      MONGODB_URL: mongodb://mongodb:27017/${MONGODB_DATABASE}?retryWrites=true&w=majority&maxPoolSize=50&minPoolSize=10&maxConnecting=50&maxIdleTimeMS=30000
+      MONGODB_DATABASE: ${MONGODB_DATABASE}
+    volumes:
+      - ../services/price_service:/app:ro
     depends_on:
-      - mongodb
+      mongodb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   mongodb:
     image: mongo:5.0
+    container_name: grocery_finder_mongodb
+    command: mongod --maxConns 200
     ports:
       - "27017:27017"
     volumes:
       - mongodb_data:/data/db
+    networks:
+      - grocery_finder_network
     environment:
-      - MONGO_INITDB_DATABASE=${MONGODB_DATABASE}
+      MONGO_INITDB_DATABASE: ${MONGODB_DATABASE}
     healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/${MONGODB_DATABASE} --quiet
-      interval: 10s
+      test: mongosh --quiet --eval "db.runCommand({ping:1}).ok"
+      interval: 60s
       timeout: 10s
       retries: 5
       start_period: 40s
+    ulimits:
+      nofile:
+        soft: 64000
+        hard: 64000
+
+  redis:
+    image: redis:7-alpine
+    container_name: grocery_finder_redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - grocery_finder_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 60s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   postgres:
-    image: postgres:14
+    image: postgres:14-alpine
+    container_name: grocery_finder_postgres
     ports:
       - "5432:5432"
     environment:
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_DB=${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - grocery_finder_network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 10s
+      interval: 60s
       timeout: 5s
       retries: 5
       start_period: 10s
@@ -103,7 +211,12 @@ volumes:
     name: grocery_finder_mongodb_data
   postgres_data:
     name: grocery_finder_postgres_data
+  redis_data:
+    name: grocery_finder_redis_data
 
 networks:
-  default:
+  grocery_finder_network:
     name: grocery_finder_network
+    driver: bridge
+    labels:
+      com.docker.compose.network: "grocery_finder_network"

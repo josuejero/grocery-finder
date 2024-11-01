@@ -63,8 +63,9 @@ class ServiceResponse(BaseModel):
 
 @lru_cache()
 def get_redis_client():
+    redis_url = os.getenv("REDIS_URL", "redis://redis:6379")
     return redis.from_url(
-        "redis://localhost:6379",
+        redis_url,
         encoding="utf-8",
         decode_responses=True,
     )
