@@ -12,3 +12,7 @@ python-multipart>=0.0.5
 sqlalchemy>=1.4.23
 sqlalchemy-utils>=0.38.2
 uvicorn>=0.15.0
+pytest 
+pytest-asyncio 
+pytest-cov 
+httpx

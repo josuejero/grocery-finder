@@ -1,13 +1,9 @@
-aiohttp>=3.8.1  # For async HTTP requests
-beautifulsoup4>=4.9.3  # For web scraping
-# Price Service dependencies
+aiohttp>=3.8.1
 fastapi>=0.68.0
 motor>=2.5.1
-numpy>=1.21.0  # For numerical computations
-pandas>=1.3.0  # For price analysis
+numpy>=1.21.0
+pandas>=1.3.0
 pydantic>=1.8.2
 python-dotenv>=0.19.0
-requests>=2.26.0  # For HTTP requests
-scikit-learn>=0.24.2  # For data preprocessing
-tensorflow>=2.6.0  # For ML price predictions
+requests>=2.26.0
 uvicorn>=0.15.0

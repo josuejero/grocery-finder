@@ -42,19 +42,18 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "
 BCRYPT_SALT_ROUNDS = int(os.getenv("BCRYPT_SALT_ROUNDS", "12"))
 
 pwd_context = CryptContext(
-    schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=BCRYPT_SALT_ROUNDS
+    schemes=["bcrypt"], 
+    deprecated="auto", 
+    bcrypt__rounds=BCRYPT_SALT_ROUNDS
 )
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
-
 
 class Token(BaseModel):
     access_token: str
     token_type: str
 
-
 class TokenData(BaseModel):
     username: Optional[str] = None
-
 
 class User(BaseModel):
     username: str
@@ -62,14 +61,11 @@ class User(BaseModel):
     full_name: Optional[str] = None
     disabled: Optional[bool] = False
 
-
 class UserInDB(User):
     hashed_password: str
 
-
 class UserCreate(User):
     password: str
-
 
 @app.on_event("startup")
 async def startup_db_client():
@@ -83,29 +79,23 @@ async def startup_db_client():
         logger.error(f"Failed to connect to MongoDB: {e}")
         raise
 
-
 @app.on_event("shutdown")
 async def shutdown_db_client():
     app.mongodb_client.close()
-
 
 async def setup_indexes():
     await app.mongodb.users.create_index("username", unique=True)
     await app.mongodb.users.create_index("email", unique=True)
 
-
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
-
 
 def get_password_hash(password):
     return pwd_context.hash(password)
 
-
 async def get_user(username: str):
     if user_dict := await app.mongodb.users.find_one({"username": username}):
         return UserInDB(**user_dict)
-
 
 async def authenticate_user(username: str, password: str):
     user = await get_user(username)
@@ -115,14 +105,12 @@ async def authenticate_user(username: str, password: str):
         return False
     return user
 
-
 def create_access_token(data: dict):
     to_encode = data.copy()
     expire = datetime.now(UTC) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
     return encoded_jwt
-
 
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     credentials_exception = HTTPException(
@@ -142,7 +130,6 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     if user is None:
         raise credentials_exception
     return user
-
 
 @app.post("/register", response_model=User)
 async def register_user(user: UserCreate):
@@ -172,8 +159,7 @@ async def register_user(user: UserCreate):
             detail="Failed to create user",
         )
 
-
-@app.post("/token", response_model=Token)
+@app.post("/login", response_model=Token)
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     user = await authenticate_user(form_data.username, form_data.password)
     if not user:
@@ -185,11 +171,9 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     access_token = create_access_token(data={"sub": user.username})
     return {"access_token": access_token, "token_type": "bearer"}
 
-
 @app.get("/users/me", response_model=User)
 async def read_users_me(current_user: User = Depends(get_current_user)):
     return current_user
-
 
 @app.get("/health")
 async def health_check():
@@ -207,8 +191,6 @@ async def health_check():
             detail="Database connection failed",
         )
 
-
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run(app, host="0.0.0.0", port=8001, reload=True)

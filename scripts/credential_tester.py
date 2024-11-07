@@ -3,17 +3,14 @@ import logging
 import os
 import socket
 import dns.resolver
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
-import boto3
 import jwt
 import motor.motor_asyncio
 import psycopg2
 import redis
-import requests
 from dotenv import dotenv_values
-import aioboto3
 
 logging.basicConfig(level=logging.DEBUG,
                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -23,11 +20,9 @@ logging.basicConfig(level=logging.DEBUG,
 logger = logging.getLogger(__name__)
 
 REQUIRED_ENV_VARS = [
-    "AWS_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
     "JWT_SECRET_KEY", "JWT_ALGORITHM", "JWT_ACCESS_TOKEN_EXPIRE_MINUTES",
     "POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB",
     "MONGODB_URL", "MONGODB_DATABASE",
-    "COGNITO_USER_POOL_ID", "COGNITO_APP_CLIENT_ID", "COGNITO_AWS_REGION",
     "AUTH_SERVICE_URL", "USER_SERVICE_URL", "PRICE_SERVICE_URL",
     "REDIS_HOST", "REDIS_PORT", "REDIS_PASSWORD",
     "RATE_LIMIT_PER_MINUTE", "LOG_LEVEL", "BCRYPT_SALT_ROUNDS"
@@ -137,45 +132,11 @@ async def test_service_url(service_name, url):
         logger.error(f"Traceback: {traceback.format_exc()}")
         return False
 
-async def test_aws_credentials():
-    try:
-        session = boto3.Session(
-            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-            region_name=os.getenv("AWS_REGION")
-        )
-        sts = session.client('sts')
-        sts.get_caller_identity()
-        return True
-    except Exception as e:
-        logger.error(f"AWS Credentials Test Failed: {str(e)}")
-        return False
-
-async def test_cognito_credentials():
-    try:
-        async with aioboto3.Session().client(
-            'cognito-idp',
-            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-            region_name=os.getenv("COGNITO_AWS_REGION")
-        ) as cognito:
-            await cognito.describe_user_pool(
-                UserPoolId=os.getenv("COGNITO_USER_POOL_ID")
-            )
-            await cognito.describe_user_pool_client(
-                UserPoolId=os.getenv("COGNITO_USER_POOL_ID"),
-                ClientId=os.getenv("COGNITO_APP_CLIENT_ID")
-            )
-        return True
-    except Exception as e:
-        logger.error(f"Cognito Credentials Test Failed: {str(e)}")
-        return False
-
 async def test_jwt_token():
     try:
         token_data = {
             "sub": "test_user",
-            "exp": datetime.now(UTC) + timedelta(minutes=30)
+            "exp": datetime.now(timezone.utc) + timedelta(minutes=30)
         }
         token = jwt.encode(
             token_data,
@@ -216,105 +177,18 @@ async def test_mongodb_connection():
 
 async def test_redis_connection():
     try:
-        redis_host = os.getenv("REDIS_HOST", "")
-        redis_port = os.getenv("REDIS_PORT", "6379")
-        redis_password = os.getenv("REDIS_PASSWORD", "")
-
-        logger.debug(f"Redis cluster connection attempt:")
-        logger.debug(f"Configuration Endpoint: {redis_host}")
-        logger.debug(f"Port: {redis_port}")
-        logger.debug(f"Password length: {len(redis_password) if redis_password else 0}")
-        logger.debug(f"SSL: enabled")
-
-        # Clean up the host
-        if ":" in redis_host:
-            redis_host = redis_host.split(":")[0]
-            logger.debug(f"Cleaned host: {redis_host}")
-
-        # Setup connection options
-        connection_kwargs = {
-            "host": redis_host,
-            "port": int(redis_port),
-            "password": redis_password,
-            "ssl": True,
-            "ssl_cert_reqs": None,
-            "decode_responses": True,
-            "socket_connect_timeout": 5.0,
-            "socket_timeout": 5.0,
-            "retry_on_timeout": True,
-        }
-
-        # First try direct non-cluster connection
-        try:
-            logger.debug("Attempting direct Redis connection first...")
-            redis_client = redis.Redis(**connection_kwargs)
-            ping_result = redis_client.ping()
-            logger.debug(f"Direct connection ping result: {ping_result}")
-            redis_client.close()
-            logger.info("Direct Redis connection successful")
-            return True
-        except Exception as direct_error:
-            logger.debug(f"Direct connection failed: {str(direct_error)}")
-            logger.debug("Falling back to cluster connection...")
-
-        # Try cluster connection
-        try:
-            logger.debug("Creating Redis Cluster connection...")
-            
-            # Create nodes list
-            startup_node = redis.cluster.ClusterNode(
-                host=redis_host,
-                port=int(redis_port)
-            )
-            
-            redis_client = redis.cluster.RedisCluster(
-                startup_nodes=[startup_node],
-                cluster_error_retry_attempts=3,
-                password=redis_password,
-                decode_responses=True,
-                skip_full_coverage_check=True,
-                ssl=True,
-                ssl_cert_reqs=None,
-                socket_timeout=5.0,
-                socket_connect_timeout=5.0,
-                retry_on_timeout=True
-            )
-
-            logger.debug("Testing cluster connection...")
-            
-            # Test basic operations
-            test_key = "cluster_test"
-            logger.debug("Testing SET operation...")
-            redis_client.set(test_key, "1", ex=5)
-            
-            logger.debug("Testing GET operation...")
-            value = redis_client.get(test_key)
-            logger.debug(f"Retrieved value: {value}")
-            
-            logger.debug("Testing DELETE operation...")
-            redis_client.delete(test_key)
-            
-            redis_client.close()
-            logger.info("Redis cluster connection test successful")
-            return True
-
-        except Exception as cluster_error:
-            logger.error(f"Redis cluster connection failed: {str(cluster_error)}")
-            if hasattr(cluster_error, 'args') and cluster_error.args:
-                logger.error(f"Detailed error: {cluster_error.args[0]}")
-            return False
-
+        redis_client = redis.Redis(
+            host=os.getenv("REDIS_HOST"),
+            port=int(os.getenv("REDIS_PORT")),
+            password=os.getenv("REDIS_PASSWORD"),
+            decode_responses=True
+        )
+        redis_client.ping()
+        redis_client.close()
+        return True
     except Exception as e:
-        logger.error(f"Unexpected error testing Redis: {str(e)}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
+        logger.error(f"Redis Test Failed: {str(e)}")
         return False
-    finally:
-        try:
-            if 'redis_client' in locals():
-                redis_client.close()
-        except Exception as e:
-            logger.warning(f"Error during cleanup: {str(e)}")
 
 async def main():
     if not load_env_vars():
@@ -322,8 +196,6 @@ async def main():
         return
 
     results = {
-        "AWS Credentials": await test_aws_credentials(),
-        "Cognito Credentials": await test_cognito_credentials(),
         "JWT Token": await test_jwt_token(),
         "PostgreSQL": await test_postgres_connection(),
         "MongoDB": await test_mongodb_connection(),

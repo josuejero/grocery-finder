@@ -46,3 +46,4 @@ Thumbs.db
 htmlcov/
 all_code.txt
 credential_tests.log
+*.pem
