@@ -1,147 +1,233 @@
+import asyncio
 import logging
+import os
 import sys
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import httpx
-import pytest
-from fastapi.testclient import TestClient
-from main import LoginCredentials, app
+import time
+import traceback
+import urllib.parse
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta
+import requests
+from typing import Optional, Dict, Any
 
 logging.basicConfig(
     level=logging.DEBUG,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("test_api_gateway.log"),
-        logging.StreamHandler(sys.stdout),
-    ],
+        logging.FileHandler("docker_api_tests.log"),
+        logging.StreamHandler(sys.stdout)
+    ]
 )
 logger = logging.getLogger(__name__)
 
-app.state.testing = True
-client = TestClient(app)
+BASE_URL = "http://localhost:8000"
+TEST_USER = {
+    "username": "dockertestuser",
+    "email": "dockertest@example.com",
+    "password": "TestPass123!",
+    "full_name": "Docker Test User"
+}
 
+class APIGatewayTester:
+    def __init__(self, base_url: str):
+        self.base_url = base_url
+        self.access_token = None
+        self.session = requests.Session()
 
-@pytest.fixture(autouse=True)
-def mock_env_vars(monkeypatch):
-    logger.debug("Setting up mock environment variables")
-    try:
-        monkeypatch.setenv("JWT_SECRET_KEY", "test_secret")
-        monkeypatch.setenv("AUTH_SERVICE_URL", "http://auth:8000")
-        monkeypatch.setenv("USER_SERVICE_URL", "http://users:8000")
-        monkeypatch.setenv("PRICE_SERVICE_URL", "http://prices:8000")
-        monkeypatch.setenv("RATE_LIMIT_PER_MINUTE", "60")
-        logger.debug("Mock environment variables set successfully")
-    except Exception as e:
-        logger.error(f"Failed to set mock environment variables: {str(e)}")
-        raise
+    def wait_for_services(self, max_retries: int = 30, retry_delay: int = 2) -> bool:
+        logger.info("Waiting for all services to be ready...")
+        
+        for attempt in range(max_retries):
+            try:
+                response = self.session.get(f"{self.base_url}/health")
+                if response.status_code == 200:
+                    health_data = response.json()
+                    services_status = health_data.get("services", {})
+                    
+                    all_healthy = all(
+                        status == "healthy" 
+                        for service, status in services_status.items()
+                    )
+                    
+                    if all_healthy:
+                        logger.info("All services are healthy!")
+                        return True
+                    
+                    logger.warning(
+                        f"Services status: {', '.join(f'{s}: {st}' for s, st in services_status.items())}"
+                    )
+                else:
+                    logger.warning(f"Health check failed: {response.status_code}")
+            except requests.RequestException as e:
+                logger.warning(f"Connection attempt {attempt + 1} failed: {str(e)}")
+            
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+        
+        logger.error("Services failed to become ready")
+        return False
 
-
-@pytest.fixture(autouse=True)
-def mock_redis():
-    logger.debug("Setting up mock Redis client")
-    try:
-        redis_mock = AsyncMock()
-        redis_mock.incr.return_value = 1
-        redis_mock.expire.return_value = True
-
-        with patch("main.get_redis_client", return_value=redis_mock):
-            logger.debug("Mock Redis client setup complete")
-            yield redis_mock
-    except Exception as e:
-        logger.error(f"Failed to setup mock Redis: {str(e)}")
-        raise
-
-
-def test_health_check():
-    logger.debug("Running health check test")
-    try:
-        response = client.get("/health")
-        logger.debug(f"Health check response: {response.json()}")
-        assert response.status_code == 200
-        assert "status" in response.json()
-        assert response.json()["status"] == "healthy"
-        assert "timestamp" in response.json()
-        logger.debug("Health check test passed")
-    except Exception as e:
-        logger.error(f"Health check test failed: {str(e)}")
-        raise
-
-
-def test_login_success():
-    logger.debug("Running login success test")
-    try:
-        test_credentials = LoginCredentials(username="testuser", password="testpass")
-
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {"access_token": "test_token"}
-
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_client.return_value.__aenter__.return_value.post.return_value = (
-                mock_response
+    def register_user(self) -> bool:
+        logger.info(f"Registering test user: {TEST_USER['username']}")
+        try:
+            response = self.session.post(
+                f"{self.base_url}/auth/register",
+                json=TEST_USER,
+                headers={"Content-Type": "application/json"}
             )
+            
+            if response.status_code == 200:
+                logger.info("User registration successful")
+                return True
+            elif response.status_code == 400 and "already registered" in response.text:
+                logger.info("User already exists")
+                return True
+            else:
+                logger.error(f"Registration failed: {response.status_code} - {response.text}")
+                return False
+        except requests.RequestException as e:
+            logger.error(f"Registration request failed: {str(e)}")
+            return False
 
-            response = client.post("/auth/login", json=test_credentials.model_dump())
-            logger.debug(f"Login response: {response.json()}")
-
-            assert response.status_code == 200
-            assert "access_token" in response.json()
-            logger.debug("Login success test passed")
-
-    except Exception as e:
-        logger.error(f"Login success test failed: {str(e)}")
-        raise
-
-
-def test_login_failure():
-    logger.debug("Running login failure test")
-    try:
-        test_credentials = LoginCredentials(username="testuser", password="wrongpass")
-
-        mock_response = MagicMock()
-        mock_response.status_code = 401
-        mock_response.json.return_value = {"detail": "Invalid credentials"}
-
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_client.return_value.__aenter__.return_value.post.return_value = (
-                mock_response
+    def login(self) -> bool:
+        logger.info(f"Logging in as: {TEST_USER['username']}")
+        try:
+            form_data = {
+                "username": TEST_USER["username"],
+                "password": TEST_USER["password"]
+            }
+            
+            response = self.session.post(
+                f"{self.base_url}/auth/login",
+                data=form_data,
+                headers={"Content-Type": "application/x-www-form-urlencoded"}
             )
+            
+            if response.status_code == 200:
+                self.access_token = response.json()["access_token"]
+                logger.info("Login successful")
+                return True
+            else:
+                logger.error(f"Login failed: {response.status_code} - {response.text}")
+                return False
+        except requests.RequestException as e:
+            logger.error(f"Login request failed: {str(e)}")
+            return False
 
-            response = client.post("/auth/login", json=test_credentials.model_dump())
-            logger.debug(f"Login failure response: {response.json()}")
+    def test_protected_endpoints(self) -> bool:
+        if not self.access_token:
+            logger.error("No access token available")
+            return False
 
-            assert response.status_code == 401
-            assert "detail" in response.json()
-            assert response.json()["detail"] == "Invalid credentials"
-            logger.debug("Login failure test passed")
+        endpoints = [
+            "/users/me",
+            "/users/me/preferences",
+            "/users/me/shopping-lists"
+        ]
 
-    except Exception as e:
-        logger.error(f"Login failure test failed: {str(e)}")
-        raise
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json"
+        }
 
+        all_successful = True
+        for endpoint in endpoints:
+            logger.info(f"Testing endpoint: {endpoint}")
+            try:
+                response = self.session.get(
+                    f"{self.base_url}{endpoint}",
+                    headers=headers
+                )
+                
+                if response.status_code in [200, 404]:
+                    logger.info(f"Endpoint {endpoint} test passed")
+                else:
+                    logger.error(
+                        f"Endpoint {endpoint} test failed: {response.status_code} - {response.text}"
+                    )
+                    all_successful = False
+            except requests.RequestException as e:
+                logger.error(f"Request to {endpoint} failed: {str(e)}")
+                all_successful = False
 
-def test_login_service_unavailable():
-    logger.debug("Running login service unavailable test")
-    try:
-        test_credentials = LoginCredentials(username="testuser", password="testpass")
+        return all_successful
 
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_client.return_value.__aenter__.return_value.post.side_effect = (
-                httpx.RequestError("Connection failed")
-            )
+    def test_rate_limiting(self) -> bool:
+        logger.info("Starting rate limit test")
+        endpoint = f"{self.base_url}/health"
+        requests_to_send = 100
 
-            response = client.post("/auth/login", json=test_credentials.model_dump())
-            logger.debug(f"Service unavailable response: {response.json()}")
+        session = requests.Session()
+        adapter = requests.adapters.HTTPAdapter(
+            max_retries=3,
+            pool_connections=20,
+            pool_maxsize=20
+        )
+        session.mount('http://', adapter)
+        
+        try:
+            logger.debug("Sending warmup request")
+            warmup = session.get(endpoint)
+            logger.debug(f"Warmup response: {warmup.status_code}")
+            
+            with ThreadPoolExecutor(max_workers=20) as executor:
+                futures = []
+                for _ in range(requests_to_send):
+                    futures.append(executor.submit(session.get, endpoint))
+                
+                responses = []
+                try:
+                    for i, future in enumerate(as_completed(futures), 1):
+                        try:
+                            response = future.result()
+                            status_code = response.status_code
+                            responses.append(status_code)
+                            
+                            headers = response.headers
+                            rate_limit = headers.get('X-RateLimit-Limit')
+                            rate_reset = headers.get('X-RateLimit-Reset')
+                            retry_after = headers.get('Retry-After')
+                            
+                            if status_code == 429:
+                                logger.info(f"Rate limit hit after {i} requests")
+                                return True
+                                
+                        except Exception as e:
+                            logger.error(f"Error processing request {i}: {str(e)}")
+                            
+                except Exception as e:
+                    logger.error(f"Error in rate limit test: {str(e)}")
+                    return False
+                    
+            return False
+            
+        except Exception as e:
+            logger.error(f"Unexpected error in rate limit test: {str(e)}")
+            logger.error(traceback.format_exc())
+            return False
+        finally:
+            session.close()
 
-            assert response.status_code == 503
-            assert "detail" in response.json()
-            assert response.json()["detail"] == "Auth service unavailable"
-            logger.debug("Login service unavailable test passed")
+    def run_all_tests(self) -> bool:
+        test_results = {
+            "Services Health": self.wait_for_services(),
+            "User Registration": self.register_user(),
+            "User Login": self.login(),
+            "Protected Endpoints": self.test_protected_endpoints(),
+            "Rate Limiting": self.test_rate_limiting()
+        }
 
-    except Exception as e:
-        logger.error(f"Login service unavailable test failed: {str(e)}")
-        raise
+        logger.info("\nTest Results:")
+        for test_name, result in test_results.items():
+            status = "✓ Passed" if result else "✗ Failed"
+            logger.info(f"{test_name}: {status}")
 
+        return all(test_results.values())
+
+def main():
+    tester = APIGatewayTester(BASE_URL)
+    success = tester.run_all_tests()
+    sys.exit(0 if success else 1)
 
 if __name__ == "__main__":
-    pytest.main(["-v", "--log-cli-level=DEBUG"])
+    main()

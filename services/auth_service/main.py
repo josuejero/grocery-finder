@@ -24,7 +24,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Auth Service")
+from fastapi import FastAPI
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.mongodb_client = AsyncIOMotorClient(MONGODB_URL)
+    app.mongodb = app.mongodb_client[MONGODB_DATABASE]
+    try:
+        await app.mongodb.command("ping")
+        logger.info("Successfully connected to MongoDB")
+        await setup_indexes()
+        yield
+    finally:
+        app.mongodb_client.close()
+
+app = FastAPI(title="Auth Service", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -46,7 +61,7 @@ pwd_context = CryptContext(
     deprecated="auto", 
     bcrypt__rounds=BCRYPT_SALT_ROUNDS
 )
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
 class Token(BaseModel):
     access_token: str
@@ -66,22 +81,6 @@ class UserInDB(User):
 
 class UserCreate(User):
     password: str
-
-@app.on_event("startup")
-async def startup_db_client():
-    app.mongodb_client = AsyncIOMotorClient(MONGODB_URL)
-    app.mongodb = app.mongodb_client[MONGODB_DATABASE]
-    try:
-        await app.mongodb.command("ping")
-        logger.info("Successfully connected to MongoDB")
-        await setup_indexes()
-    except Exception as e:
-        logger.error(f"Failed to connect to MongoDB: {e}")
-        raise
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    app.mongodb_client.close()
 
 async def setup_indexes():
     await app.mongodb.users.create_index("username", unique=True)
@@ -105,9 +104,12 @@ async def authenticate_user(username: str, password: str):
         return False
     return user
 
-def create_access_token(data: dict):
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
-    expire = datetime.now(UTC) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    if expires_delta:
+        expire = datetime.now(UTC) + expires_delta
+    else:
+        expire = datetime.now(UTC) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
     return encoded_jwt
@@ -124,7 +126,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         if username is None:
             raise credentials_exception
         token_data = TokenData(username=username)
-    except jwt.JWTError:
+    except (jwt.PyJWTError, jwt.ExpiredSignatureError):
         raise credentials_exception
     user = await get_user(username=token_data.username)
     if user is None:
@@ -161,15 +163,24 @@ async def register_user(user: UserCreate):
 
 @app.post("/login", response_model=Token)
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    user = await authenticate_user(form_data.username, form_data.password)
-    if not user:
+    try:
+        user = await authenticate_user(form_data.username, form_data.password)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect username or password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        access_token = create_access_token(data={"sub": user.username})
+        return {"access_token": access_token, "token_type": "bearer"}
+    except Exception as e:
+        logger.error(f"Login error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
+            detail="Authentication failed",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    access_token = create_access_token(data={"sub": user.username})
-    return {"access_token": access_token, "token_type": "bearer"}
 
 @app.get("/users/me", response_model=User)
 async def read_users_me(current_user: User = Depends(get_current_user)):

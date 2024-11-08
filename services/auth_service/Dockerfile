@@ -18,10 +18,14 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir --upgrade pip
 
+# Copy and install requirements first to leverage Docker caching
 COPY requirements.txt .
 
-RUN pip install --no-cache-dir -r requirements.txt
+# Install dev dependencies for testing
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir pytest pytest-asyncio pytest-cov httpx
 
+# Copy application code
 COPY . .
 
 EXPOSE 8000

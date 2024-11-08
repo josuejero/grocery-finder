@@ -1,28 +1,53 @@
 import logging
 import os
 import sys
-import traceback
-from datetime import UTC, datetime
-from functools import lru_cache
+from datetime import datetime, timedelta
+import datetime as dt
+from datetime import UTC
 from typing import Dict, Optional
-
 import httpx
 import jwt
-import redis.asyncio as redis
+import redis.asyncio as redis 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from prometheus_client import Counter, Histogram
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 
 logging.basicConfig(
     level=logging.DEBUG,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    format="%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s",
     handlers=[
-        logging.StreamHandler(sys.stdout)
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler("api_gateway.log")
     ],
 )
 logger = logging.getLogger(__name__)
+
+class User(BaseModel):
+    username: str
+    email: EmailStr
+    full_name: Optional[str] = None
+
+class UserCreate(User):
+    password: str
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+class LoginCredentials(BaseModel):
+    username: str
+    password: str
+
+class ServiceResponse(BaseModel):
+    status: str
+    data: Optional[Dict] = None
+    error: Optional[str] = None
+
+REQUEST_COUNT = Counter("http_requests_total", "Total HTTP requests", ["method", "endpoint", "status"])
+REQUEST_LATENCY = Histogram("http_request_duration_seconds", "HTTP request latency", ["endpoint"])
+RATE_LIMIT_COUNTER = Counter("rate_limit_hits_total", "Total number of rate limit triggers", ["client_ip"])
 
 app = FastAPI(title="Grocery Finder API Gateway")
 
@@ -34,156 +59,92 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL", "http://auth_service:8000")
-USER_SERVICE_URL = os.getenv("USER_SERVICE_URL", "http://user_service:8000")
-PRICE_SERVICE_URL = os.getenv("PRICE_SERVICE_URL", "http://price_service:8000")
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
-JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
-RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "60"))
+def get_required_env_var(key: str) -> str:
+    value = os.getenv(key)
+    if not value:
+        error_msg = f"Required environment variable {key} is not set"
+        logger.critical(error_msg)
+        raise ValueError(error_msg)
+    return value
+
+try:
+    AUTH_SERVICE_URL = "http://auth_service:8000"
+    USER_SERVICE_URL = "http://user_service:8000"
+    PRICE_SERVICE_URL = "http://price_service:8000"
+    JWT_SECRET_KEY = get_required_env_var("JWT_SECRET_KEY")
+    JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+    RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "60"))
+    REDIS_URL = "redis://redis:6379"
+except ValueError as e:
+    logger.critical(f"Failed to initialize environment variables: {e}")
+    sys.exit(1)
 
 redis_client = None
-
-REQUEST_COUNT = Counter(
-    "http_requests_total", "Total HTTP requests", ["method", "endpoint"]
-)
-REQUEST_LATENCY = Histogram("http_request_duration_seconds", "HTTP request latency")
-
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
-class LoginCredentials(BaseModel):
-    username: str
-    password: str
-
-class ServiceResponse(BaseModel):
-    status: str
-    data: Optional[Dict] = None
-    error: Optional[str] = None
-    
-
-class UserCreate(BaseModel):
-    username: str
-    email: str
-    password: str
-    full_name: Optional[str] = None
+class RateLimitExceeded(Exception):
+    pass
 
 @app.on_event("startup")
 async def startup_event():
     global redis_client
     logger.info("Starting API Gateway")
-    
-    redis_url = os.getenv("REDIS_URL", "redis://redis:6379")
-    redis_client = redis.from_url(
-        redis_url,
-        encoding="utf-8",
-        decode_responses=True,
-    )
-    
     try:
+        logger.debug(f"Connecting to Redis at {REDIS_URL}")
+        redis_client = redis.from_url(
+            REDIS_URL,
+            encoding="utf-8",
+            decode_responses=True,
+            socket_connect_timeout=5.0
+        )
         await redis_client.ping()
         logger.info("Successfully connected to Redis")
     except Exception as e:
-        logger.error(f"Failed to connect to Redis: {str(e)}")
-    
-    await check_service_health()
+        logger.error(f"Failed to connect to Redis: {e}")
+        redis_client = None
 
 @app.on_event("shutdown")
 async def shutdown_event():
     if redis_client:
         await redis_client.close()
-        logger.info("Closed Redis connection")
+    logger.info("API Gateway shutdown complete")
 
-async def check_service_health():
-    services = {
-        "auth": AUTH_SERVICE_URL,
-        "user": USER_SERVICE_URL,
-        "price": PRICE_SERVICE_URL
-    }
-    
-    async with httpx.AsyncClient() as client:
-        for name, url in services.items():
-            try:
-                response = await client.get(f"{url}/health", timeout=5.0)
-                if response.status_code == 200:
-                    logger.info(f"{name} service is healthy")
-                else:
-                    logger.error(f"{name} service health check failed: {response.status_code}")
-            except Exception as e:
-                logger.error(f"Failed to connect to {name} service: {str(e)}")
-
-@app.middleware("http")
-async def rate_limit_middleware(request: Request, call_next):
-    logger.debug(f"Processing request: {request.method} {request.url.path}")
-
-    if getattr(app.state, "testing", False):
-        logger.debug("Testing mode detected, skipping rate limiting")
-        return await call_next(request)
-
-    if not redis_client:
-        logger.warning("Redis client not available, skipping rate limiting")
-        return await call_next(request)
-
-    try:
-        client_ip = request.client.host
-        key = f"rate_limit:{client_ip}"
-
-        requests = await redis_client.incr(key)
-        if requests == 1:
-            await redis_client.expire(key, 60)
-
-        if requests > RATE_LIMIT_PER_MINUTE:
-            raise HTTPException(
-                status_code=429,
-                detail="Rate limit exceeded. Please try again later.",
-            )
-
-        response = await call_next(request)
-        return response
-    except redis.ConnectionError as e:
-        logger.error(f"Redis connection error: {str(e)}")
-        return await call_next(request)
-    except Exception as e:
-        logger.error(f"Rate limit middleware error: {str(e)}")
-        return await call_next(request)
-
-async def validate_token(token: str = Depends(oauth2_scheme)) -> dict:
+async def verify_token(token: str = Depends(oauth2_scheme)) -> dict:
     try:
         payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
         return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token has expired")
     except jwt.JWTError as e:
-        logger.error(f"JWT validation error: {str(e)}")
+        logger.error(f"JWT validation error: {e}")
         raise HTTPException(status_code=401, detail="Could not validate token")
 
 @app.get("/health")
 async def health_check():
-    logger.debug("Health check requested")
     try:
         services_status = {}
-        
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=5.0) as client:
             for name, url in {
                 "auth": AUTH_SERVICE_URL,
                 "user": USER_SERVICE_URL,
                 "price": PRICE_SERVICE_URL
             }.items():
                 try:
-                    response = await client.get(f"{url}/health", timeout=5.0)
+                    response = await client.get(f"{url}/health")
                     services_status[name] = "healthy" if response.status_code == 200 else "unhealthy"
                 except Exception as e:
-                    logger.error(f"Health check failed for {name} service: {str(e)}")
+                    logger.error(f"Health check failed for {name} service: {e}")
                     services_status[name] = "unavailable"
 
+        redis_status = "unavailable"
         if redis_client:
             try:
                 await redis_client.ping()
-                services_status["redis"] = "healthy"
+                redis_status = "healthy"
             except Exception as e:
-                logger.error(f"Redis health check failed: {str(e)}")
-                services_status["redis"] = "unavailable"
-        else:
-            services_status["redis"] = "unavailable"
+                logger.error(f"Redis health check failed: {e}")
 
+        services_status["redis"] = redis_status
         overall_status = "healthy" if all(s == "healthy" for s in services_status.values()) else "degraded"
         
         return {
@@ -193,7 +154,7 @@ async def health_check():
             "services": services_status
         }
     except Exception as e:
-        logger.error(f"Health check error: {str(e)}")
+        logger.error(f"Health check error: {e}")
         return {
             "status": "unhealthy",
             "timestamp": datetime.now(UTC).isoformat(),
@@ -201,90 +162,59 @@ async def health_check():
             "error": str(e)
         }
 
-@app.post("/auth/register")
+@app.post("/auth/login", response_model=Token)
+async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    logger.debug(f"Login attempt for user: {form_data.username}")
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                f"{AUTH_SERVICE_URL}/login",
+                data={
+                    "username": form_data.username,
+                    "password": form_data.password,
+                    "grant_type": form_data.grant_type or "password"
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"}
+            )
+            
+            if response.status_code != 200:
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=response.json().get("detail", "Authentication failed")
+                )
+                
+            return response.json()
+    except httpx.RequestError as e:
+        logger.error(f"Auth service request failed: {e}")
+        raise HTTPException(status_code=503, detail="Auth service unavailable")
+
+@app.post("/auth/register", response_model=User)
 async def register(user: UserCreate):
     logger.debug(f"Registration attempt for user: {user.username}")
-    REQUEST_COUNT.labels(method="POST", endpoint="/auth/register").inc()
-
     try:
-        async with httpx.AsyncClient() as client:
-            auth_register_url = f"{AUTH_SERVICE_URL}/register"
-            logger.debug(f"Forwarding register request to auth service: {auth_register_url}")
-            
+        async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(
-                auth_register_url,
+                f"{AUTH_SERVICE_URL}/register",
                 json=user.model_dump(),
-                timeout=10.0
+                headers={"Content-Type": "application/json"}
             )
 
-            response_data = response.json()
-            logger.debug(f"Auth service registration response: {response.status_code}")
+            if response.status_code == 400:
+                raise HTTPException(
+                    status_code=400,
+                    detail=response.json().get("detail", "Registration failed")
+                )
 
             if response.status_code != 200:
                 raise HTTPException(
                     status_code=response.status_code,
-                    detail=response_data.get("detail", "Registration failed"),
+                    detail="Registration failed"
                 )
 
-            return response_data
-
+            return response.json()
     except httpx.RequestError as e:
-        logger.error(f"Auth service request failed: {str(e)}")
+        logger.error(f"Auth service request failed: {e}")
         raise HTTPException(status_code=503, detail="Auth service unavailable")
-    except HTTPException as e:
-        logger.warning(f"Registration failed: {str(e.detail)}")
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error during registration: {str(e)}")
-        logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-@app.post("/auth/login")
-async def login(credentials: LoginCredentials):
-    logger.debug(f"Login attempt for user: {credentials.username}")
-    REQUEST_COUNT.labels(method="POST", endpoint="/auth/login").inc()
-
-    try:
-        async with httpx.AsyncClient() as client:
-            auth_login_url = f"{AUTH_SERVICE_URL}/login"
-            logger.debug(f"Forwarding login request to auth service: {auth_login_url}")
-            
-            # Convert to form data as expected by the auth service
-            form_data = {
-                "username": credentials.username,
-                "password": credentials.password,
-                "grant_type": "password"
-            }
-            
-            response = await client.post(
-                auth_login_url,
-                data=form_data,  # Using form data instead of JSON
-                timeout=10.0
-            )
-
-            response_data = response.json()
-            logger.debug(f"Auth service response status: {response.status_code}")
-
-            if response.status_code != 200:
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=response_data.get("detail", "Authentication failed"),
-                )
-
-            return response_data
-
-    except httpx.RequestError as e:
-        logger.error(f"Auth service request failed: {str(e)}")
-        raise HTTPException(status_code=503, detail="Auth service unavailable")
-    except HTTPException as e:
-        logger.warning(f"Authentication failed: {str(e.detail)}")
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error during login: {str(e)}")
-        logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
 
 if __name__ == "__main__":
     import uvicorn

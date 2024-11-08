@@ -1,0 +1,30 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.0, pytest-8.3.3, pluggy-1.5.0 -- /Users/wholesway/Documents/Programming/Projects/grocery-finder/venv/bin/python3.13
+cachedir: .pytest_cache
+rootdir: /Users/wholesway/Documents/Programming/Projects/grocery-finder
+configfile: pytest.ini
+plugins: asyncio-0.24.0, cov-6.0.0, mock-3.14.0, anyio-4.6.2.post1
+asyncio: mode=Mode.AUTO, default_loop_scope=function
+collecting ... 
+----------------------------- live log collection ------------------------------
+2024-11-07 16:00:21 [   DEBUG] loaded lazy attr 'SafeConfigParser': <class 'configparser.ConfigParser'> (__init__.py:449)
+2024-11-07 16:00:21 [   DEBUG] loaded lazy attr 'NativeStringIO': <class '_io.StringIO'> (__init__.py:449)
+2024-11-07 16:00:21 [   DEBUG] loaded lazy attr 'BytesIO': <class '_io.BytesIO'> (__init__.py:449)
+collected 0 items / 1 error
+
+==================================== ERRORS ====================================
+_____________ ERROR collecting services/auth_service/test_main.py ______________
+ImportError while importing test module '/Users/wholesway/Documents/Programming/Projects/grocery-finder/services/auth_service/test_main.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.13/3.13.0_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+test_main.py:15: in <module>
+    from main import app, get_user, create_access_token
+main.py:16: in <module>
+    from main import app, get_user, create_access_token
+E   ImportError: cannot import name 'app' from partially initialized module 'main' (most likely due to a circular import) (/Users/wholesway/Documents/Programming/Projects/grocery-finder/services/auth_service/main.py)
+=========================== short test summary info ============================
+ERROR test_main.py
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+=============================== 1 error in 0.65s ===============================
