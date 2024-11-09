@@ -16,7 +16,9 @@ RUN apt-get update && \
         libpq-dev \
         netcat-traditional \
     && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir --upgrade pip
+    && pip install --no-cache-dir --upgrade pip \
+    && mkdir -p /var/log/api_gateway \
+    && chown -R nobody:nogroup /var/log/api_gateway
 
 COPY requirements.txt .
 

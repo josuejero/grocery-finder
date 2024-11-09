@@ -13,13 +13,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from prometheus_client import Counter, Histogram
 from pydantic import BaseModel, EmailStr
+from pathlib import Path
+
+# Create log directory if it doesn't exist
+log_dir = Path("/var/log/api_gateway")
+log_dir.mkdir(parents=True, exist_ok=True)
 
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s",
     handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler("api_gateway.log")
+        logging.FileHandler("/var/log/api_gateway/api_gateway.log"),
+        logging.StreamHandler(sys.stdout)
     ],
 )
 logger = logging.getLogger(__name__)

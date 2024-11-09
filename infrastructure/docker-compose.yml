@@ -40,7 +40,8 @@ services:
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE}
       REDIS_URL: redis://redis:6379
     volumes:
-      - ../services/api_gateway:/app:ro
+      - ../services/api_gateway:/app:ro  # Code mount (read-only)
+      - api_gateway_logs:/var/log/api_gateway  # Mount logs outside /app
     depends_on:
       redis:
         condition: service_healthy
@@ -206,6 +207,9 @@ services:
       retries: 5
       start_period: 10s
 
+
+
+
 volumes:
   mongodb_data:
     name: grocery_finder_mongodb_data
@@ -213,6 +217,7 @@ volumes:
     name: grocery_finder_postgres_data
   redis_data:
     name: grocery_finder_redis_data
+  api_gateway_logs:
 
 networks:
   grocery_finder_network:
