@@ -303,12 +303,12 @@ class ServiceTester:
                 assert login_response.status_code == 200
                 token = login_response.json()["access_token"]
                 
-                # Then sync user
+                # In test_auth_service_register function in service_tester.py
                 sync_response = await client.post(
-                    f"{self.user_service_url}/users/sync",
-                    headers={"Authorization": f"Bearer {token}"},
-                    json={"username": self.test_user["username"]}
+                    f"{self.user_service_url}/users/sync?username={self.test_user['username']}", # Add username as query param
+                    headers={"Authorization": f"Bearer {token}"}
                 )
+                
                 assert sync_response.status_code == 200, \
                     f"User sync failed: {sync_response.text}"
                 
@@ -375,39 +375,18 @@ class ServiceTester:
 
 
 
-
-    @async_test()
-    async def test_get_shopping_lists(self):
-        """Test retrieving all shopping lists"""
-        async with httpx.AsyncClient() as client:
-            start_time = time.time()
-            response = await client.get(
-                f"{self.user_service_url}/users/me/shopping-lists",
-                headers={"Authorization": f"Bearer {self.access_token}"}
-            )
-            duration = time.time() - start_time
-            self.record_response_time("get_shopping_lists", duration)
-            
-            assert response.status_code == 200, \
-                f"Shopping list retrieval failed: {response.text}"
-            
-            data = response.json()
-            return {"status": "success", "data": data}
-
-
-
-
-
-
-
     @async_test()
     async def test_update_shopping_list(self):
         """Test updating a shopping list"""
-        lists_result = await self.test_get_shopping_lists()
-        if not lists_result.get("data"):
+        lists_response = await self.test_get_shopping_lists()
+        if not lists_response or lists_response.status == TestStatus.FAILED:
             return {"status": "skipped", "reason": "No shopping lists to update"}
         
-        lists = lists_result["data"]
+        response_data = lists_response.response_data
+        if not response_data or "data" not in response_data:
+            return {"status": "skipped", "reason": "No shopping lists data available"}
+        
+        lists = response_data["data"]
         if not lists:
             return {"status": "skipped", "reason": "No shopping lists to update"}
         
@@ -435,11 +414,15 @@ class ServiceTester:
     @async_test()
     async def test_delete_shopping_list(self):
         """Test deleting a shopping list"""
-        lists_result = await self.test_get_shopping_lists()
-        if not lists_result.get("data"):
+        lists_response = await self.test_get_shopping_lists()
+        if not lists_response or lists_response.status == TestStatus.FAILED:
             return {"status": "skipped", "reason": "No shopping lists to delete"}
         
-        lists = lists_result["data"]
+        response_data = lists_response.response_data
+        if not response_data or "data" not in response_data:
+            return {"status": "skipped", "reason": "No shopping lists data available"}
+        
+        lists = response_data["data"]
         if not lists:
             return {"status": "skipped", "reason": "No shopping lists to delete"}
         
@@ -459,7 +442,23 @@ class ServiceTester:
             
             return {"status": "success", "deleted_id": list_id}
 
-
+    @async_test()
+    async def test_get_shopping_lists(self):
+        """Test retrieving all shopping lists"""
+        async with httpx.AsyncClient() as client:
+            start_time = time.time()
+            response = await client.get(
+                f"{self.user_service_url}/users/me/shopping-lists",
+                headers={"Authorization": f"Bearer {self.access_token}"}
+            )
+            duration = time.time() - start_time
+            self.record_response_time("get_shopping_lists", duration)
+            
+            assert response.status_code == 200, \
+                f"Shopping list retrieval failed: {response.text}"
+            
+            data = response.json()
+            return {"status": "success", "data": data}
 
 
 
