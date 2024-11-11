@@ -4,28 +4,139 @@ import logging
 import os
 import sys
 import time
+import uuid
 from datetime import datetime, timedelta
-from typing import Dict, Optional
+import datetime as dt
+from typing import Dict, Optional, List, Any
 import httpx
 import jwt
 from dotenv import load_dotenv
+from datetime import UTC
+import statistics
+import traceback
+from dataclasses import dataclass
+from enum import Enum
+import concurrent.futures
+from functools import wraps
+import jsonschema
 
 # Load environment variables
 load_dotenv()
 
-# Configure JWT settings
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "cf00a032a7d8943e4e569105b95087b382b31153c3d7aad6138a173da04f89f3")
-JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
-
+# Configure logging with more detail
 logging.basicConfig(
     level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
     handlers=[
         logging.FileHandler("integration_tests.log"),
         logging.StreamHandler(sys.stdout)
     ]
 )
 logger = logging.getLogger(__name__)
+
+class TestStatus(Enum):
+    PASSED = "✓ Passed"
+    FAILED = "✗ Failed"
+    SKIPPED = "○ Skipped"
+
+@dataclass
+class TestResult:
+    name: str
+    status: TestStatus
+    duration: float
+    error: Optional[str] = None
+    response_data: Optional[Dict] = None
+    assertions_passed: int = 0
+    assertions_failed: int = 0
+
+@dataclass
+class TestSuite:
+    name: str
+    results: List[TestResult]
+    start_time: datetime
+    end_time: Optional[datetime] = None
+    setup_duration: Optional[float] = None
+    cleanup_duration: Optional[float] = None
+
+def async_test(cleanup: bool = True):
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(self, *args, **kwargs):
+            start_time = time.time()
+            test_name = func.__name__
+            try:
+                if cleanup:
+                    await self.cleanup_test_data(test_name)
+                result = await func(self, *args, **kwargs)
+                duration = time.time() - start_time
+                return TestResult(
+                    name=test_name,
+                    status=TestStatus.PASSED,
+                    duration=duration,
+                    response_data=result if isinstance(result, dict) else None
+                )
+            except AssertionError as e:
+                duration = time.time() - start_time
+                logger.error(f"Test {test_name} failed: {str(e)}")
+                logger.error(traceback.format_exc())
+                return TestResult(
+                    name=test_name,
+                    status=TestStatus.FAILED,
+                    duration=duration,
+                    error=str(e)
+                )
+            except Exception as e:
+                duration = time.time() - start_time
+                logger.error(f"Test {test_name} failed with unexpected error: {str(e)}")
+                logger.error(traceback.format_exc())
+                return TestResult(
+                    name=test_name,
+                    status=TestStatus.FAILED,
+                    duration=duration,
+                    error=f"Unexpected error: {str(e)}"
+                )
+        return wrapper
+    return decorator
+
+# Response schemas for validation
+SCHEMAS = {
+    "auth_register": {
+        "type": "object",
+        "properties": {
+            "username": {"type": "string"},
+            "email": {"type": "string", "format": "email"},
+            "full_name": {"type": "string"}
+        },
+        "required": ["username", "email"]
+    },
+    "auth_login": {
+        "type": "object",
+        "properties": {
+            "access_token": {"type": "string"},
+            "token_type": {"type": "string"}
+        },
+        "required": ["access_token", "token_type"]
+    },
+    "shopping_list": {
+        "type": "object",
+        "properties": {
+            "id": {"type": "integer"},
+            "name": {"type": "string"},
+            "items": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "quantity": {"type": "integer"}
+                    },
+                    "required": ["name", "quantity"]
+                }
+            }
+        },
+        "required": ["id", "name", "items"]
+    }
+}
 
 class ServiceTester:
     def __init__(self):
@@ -34,101 +145,154 @@ class ServiceTester:
         self.user_service_url = "http://localhost:8002"
         self.price_service_url = "http://localhost:8003"
         self.access_token = None
+        self.test_suites: List[TestSuite] = []
+        self.current_suite: Optional[TestSuite] = None
+        self.response_times: Dict[str, List[float]] = {}
+        
+        # Generate unique test data for each run
+        self.test_id = str(uuid.uuid4())[:8]
         self.test_user = {
-            "username": "testuser123",
-            "email": "testuser123@example.com",
+            "username": f"testuser_{self.test_id}",
+            "email": f"testuser_{self.test_id}@example.com",
             "password": "TestPassword123!",
-            "full_name": "Test User"
+            "full_name": f"Test User {self.test_id}"
         }
         self.test_shopping_list = {
-            "name": "Test Shopping List",
+            "name": f"Test Shopping List {self.test_id}",
             "items": [
                 {"name": "Milk", "quantity": 1},
                 {"name": "Bread", "quantity": 2}
             ]
         }
         self.test_product = {
-            "id": "test-product-1",
+            "id": f"test-product-{self.test_id}",
             "name": "Test Product",
             "category": "Test Category",
             "brand": "Test Brand",
             "description": "Test Description"
         }
-        self.test_store = {
-            "id": "test-store-1",
-            "name": "Test Store",
-            "location": "Test Location",
-            "address": "123 Test St"
-        }
+        
         self.test_price = {
-            "store_id": "test-store-1",
-            "product_id": "test-product-1",
+            "store_id": f"test-store-{self.test_id}",
+            "product_id": f"test-product-{self.test_id}",
             "price": 9.99,
             "currency": "USD",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "unit": "each",
             "quantity": 1
         }
+        self.sync_user_url = f"{self.user_service_url}/users/sync"
+        self.created_resources = []
 
-    async def wait_for_services(self, timeout: int = 60):
-        logger.info("Waiting for all services to be ready...")
-        services = {
-            "API Gateway": f"{self.api_gateway_url}/health",
-            "Auth Service": f"{self.auth_service_url}/health",
-            "User Service": f"{self.user_service_url}/health",
-            "Price Service": f"{self.price_service_url}/health"
-        }
+    async def cleanup_test_data(self, test_name: str):
+        """Clean up any test data created during the test"""
+        if test_name in self.created_resources:
+            logger.info(f"Cleaning up test data for {test_name}")
+            try:
+                if "shopping_list" in test_name:
+                    # Delete test shopping lists
+                    headers = {"Authorization": f"Bearer {self.access_token}"}
+                    async with httpx.AsyncClient() as client:
+                        response = await client.get(
+                            f"{self.user_service_url}/users/me/shopping-lists",
+                            headers=headers
+                        )
+                        lists = response.json()
+                        for lst in lists:
+                            if lst["name"].startswith("Test Shopping List"):
+                                await client.delete(
+                                    f"{self.user_service_url}/users/me/shopping-lists/{lst['id']}",
+                                    headers=headers
+                                )
+            except Exception as e:
+                logger.error(f"Error during cleanup: {e}")
 
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            all_healthy = True
-            async with httpx.AsyncClient() as client:
-                for service_name, url in services.items():
-                    try:
-                        response = await client.get(url)
-                        if response.status_code != 200:
-                            logger.warning(f"{service_name} not ready: {response.status_code}")
-                            all_healthy = False
-                            break
-                        health_data = response.json()
-                        if health_data.get("status") != "healthy":
-                            logger.warning(f"{service_name} not healthy: {health_data}")
-                            all_healthy = False
-                            break
-                    except Exception as e:
-                        logger.warning(f"{service_name} not available: {str(e)}")
-                        all_healthy = False
-                        break
-
-            if all_healthy:
-                logger.info("All services are healthy!")
-                return True
-            
-            await asyncio.sleep(5)
-
-        logger.error("Timeout waiting for services")
-        return False
-
-    async def create_test_token(self):
-        payload = {
-            "sub": self.test_user["username"],
-            "exp": datetime.utcnow() + timedelta(minutes=30)
-        }
-        return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
-
-    async def test_auth_service(self):
-        logger.info("\nTesting Auth Service...")
+    async def validate_response(self, response_data: Dict, schema_name: str) -> bool:
+        """Validate response data against schema"""
         try:
-            async with httpx.AsyncClient() as client:
-                logger.info("Testing user registration...")
-                response = await client.post(
-                    f"{self.auth_service_url}/register",
-                    json=self.test_user
-                )
-                assert response.status_code in [200, 400], f"Registration failed: {response.text}"
+            jsonschema.validate(instance=response_data, schema=SCHEMAS[schema_name])
+            return True
+        except jsonschema.exceptions.ValidationError as e:
+            logger.error(f"Response validation failed for {schema_name}: {e}")
+            return False
 
-                logger.info("Testing user login...")
-                response = await client.post(
+    async def start_test_suite(self, name: str):
+        """Start a new test suite"""
+        self.current_suite = TestSuite(
+            name=name,
+            results=[],
+            start_time=datetime.now(UTC)
+        )
+        logger.info(f"\nStarting test suite: {name}")
+
+    async def end_test_suite(self):
+        """End the current test suite and store results"""
+        if self.current_suite:
+            self.current_suite.end_time = datetime.now(UTC)
+            self.test_suites.append(self.current_suite)
+            await self.print_suite_results(self.current_suite)
+
+    async def print_suite_results(self, suite: TestSuite):
+        """Print detailed results for a test suite"""
+        duration = (suite.end_time - suite.start_time).total_seconds()
+        passed = sum(1 for r in suite.results if r.status == TestStatus.PASSED)
+        total = len(suite.results)
+        
+        logger.info(f"\nTest Suite: {suite.name}")
+        logger.info(f"Duration: {duration:.2f}s")
+        logger.info(f"Results: {passed}/{total} passed")
+        
+        for result in suite.results:
+            status_symbol = "✓" if result.status == TestStatus.PASSED else "✗"
+            logger.info(f"\n{status_symbol} {result.name} ({result.duration:.2f}s)")
+            if result.error:
+                logger.error(f"  Error: {result.error}")
+            if result.response_data:
+                logger.info(f"  Response: {json.dumps(result.response_data, indent=2)}")
+
+    def record_response_time(self, endpoint: str, duration: float):
+        """Record response time for metrics"""
+        if endpoint not in self.response_times:
+            self.response_times[endpoint] = []
+        self.response_times[endpoint].append(duration)
+
+    async def print_performance_metrics(self):
+        """Print performance metrics for all recorded response times"""
+        logger.info("\nPerformance Metrics:")
+        for endpoint, times in self.response_times.items():
+            if times:
+                avg_time = statistics.mean(times)
+                max_time = max(times)
+                min_time = min(times)
+                p95_time = sorted(times)[int(len(times) * 0.95)]
+                logger.info(f"\n{endpoint}:")
+                logger.info(f"  Average: {avg_time:.3f}s")
+                logger.info(f"  95th percentile: {p95_time:.3f}s")
+                logger.info(f"  Min: {min_time:.3f}s")
+                logger.info(f"  Max: {max_time:.3f}s")
+
+
+
+
+    @async_test()
+    async def test_auth_service_register(self):
+        """Test user registration"""
+        response_data = None
+        async with httpx.AsyncClient() as client:
+            start_time = time.time()
+            response = await client.post(
+                f"{self.auth_service_url}/register",
+                json=self.test_user
+            )
+            duration = time.time() - start_time
+            self.record_response_time("auth_register", duration)
+            
+            assert response.status_code in [200, 400], \
+                f"Registration failed: {response.text}"
+            
+            if response.status_code == 200:
+                # First get a token
+                login_response = await client.post(
                     f"{self.auth_service_url}/login",
                     data={
                         "username": self.test_user["username"],
@@ -136,132 +300,270 @@ class ServiceTester:
                         "grant_type": "password"
                     }
                 )
-                assert response.status_code == 200, f"Login failed: {response.text}"
-                token_data = response.json()
-                self.access_token = token_data["access_token"]
-
-                logger.info("Testing user profile retrieval...")
-                response = await client.get(
-                    f"{self.auth_service_url}/users/me",
-                    headers={"Authorization": f"Bearer {self.access_token}"}
+                assert login_response.status_code == 200
+                token = login_response.json()["access_token"]
+                
+                # Then sync user
+                sync_response = await client.post(
+                    f"{self.user_service_url}/users/sync",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json={"username": self.test_user["username"]}
                 )
-                assert response.status_code == 200, f"Profile retrieval failed: {response.text}"
+                assert sync_response.status_code == 200, \
+                    f"User sync failed: {sync_response.text}"
+                
+                response_data = response.json()
+                
+            return response_data
 
-                return True
-        except Exception as e:
-            logger.error(f"Auth service test failed: {str(e)}")
-            return False
 
-    async def test_user_service(self):
-        logger.info("\nTesting User Service...")
-        try:
-            if not self.access_token:
-                logger.error("No access token available")
-                return False
 
-            # Use the token from the successful auth service login
-            # This ensures we're using a valid token from a registered user
 
-            async with httpx.AsyncClient() as client:
-                headers = {"Authorization": f"Bearer {self.access_token}"}
 
-                logger.info("Testing user profile endpoints...")
-                response = await client.get(
-                    f"{self.user_service_url}/users/me",
-                    headers=headers
-                )
-                logger.debug(f"Profile response: {response.status_code} - {response.text}")
-                assert response.status_code == 200, f"Profile retrieval failed: {response.text}"
-
-                logger.info("Testing shopping list creation...")
-                response = await client.post(
-                    f"{self.user_service_url}/users/me/shopping-lists",
-                    headers=headers,
-                    json=self.test_shopping_list
-                )
-                logger.debug(f"Shopping list creation response: {response.status_code} - {response.text}")
-                assert response.status_code == 200, f"Shopping list creation failed: {response.text}"
-                list_id = response.json()["id"]
-
-                logger.info("Testing shopping list retrieval...")
-                response = await client.get(
-                    f"{self.user_service_url}/users/me/shopping-lists",
-                    headers=headers
-                )
-                assert response.status_code == 200, f"Shopping list retrieval failed: {response.text}"
-
-                logger.info("Testing shopping list update...")
-                update_data = {
-                    "name": "Updated Shopping List",
-                    "items": [{"name": "Eggs", "quantity": 12}]
+    @async_test()
+    async def test_auth_service_login(self):
+        """Test user login"""
+        async with httpx.AsyncClient() as client:
+            start_time = time.time()
+            response = await client.post(
+                f"{self.auth_service_url}/login",
+                data={
+                    "username": self.test_user["username"],
+                    "password": self.test_user["password"],
+                    "grant_type": "password"
                 }
-                response = await client.put(
-                    f"{self.user_service_url}/users/me/shopping-lists/{list_id}",
-                    headers=headers,
-                    json=update_data
-                )
-                assert response.status_code == 200, f"Shopping list update failed: {response.text}"
+            )
+            duration = time.time() - start_time
+            self.record_response_time("auth_login", duration)
+            
+            assert response.status_code == 200, \
+                f"Login failed: {response.text}"
+            
+            data = response.json()
+            assert await self.validate_response(data, "auth_login"), \
+                "Response validation failed"
+                
+            self.access_token = data["access_token"]
+            return data
 
-                logger.info("Testing shopping list deletion...")
-                response = await client.delete(
-                    f"{self.user_service_url}/users/me/shopping-lists/{list_id}",
-                    headers=headers
-                )
-                assert response.status_code == 200, f"Shopping list deletion failed: {response.text}"
+    # Add more test methods...
+    
+    # Add these methods to the ServiceTester class:
 
-                return True
-        except Exception as e:
-            logger.error(f"User service test failed: {str(e)}")
-            return False
+    @async_test()
+    async def test_create_shopping_list(self):
+        """Test creating a new shopping list"""
+        async with httpx.AsyncClient() as client:
+            start_time = time.time()
+            response = await client.post(
+                f"{self.user_service_url}/users/me/shopping-lists",
+                headers={"Authorization": f"Bearer {self.access_token}"},
+                json=self.test_shopping_list
+            )
+            duration = time.time() - start_time
+            self.record_response_time("create_shopping_list", duration)
+            
+            assert response.status_code == 200, \
+                f"Shopping list creation failed: {response.text}"
+            
+            data = response.json()
+            assert await self.validate_response(data, "shopping_list"), \
+                "Response validation failed"
+            
+            self.created_resources.append(("shopping_list", data["id"]))
+            return data
 
-    async def test_price_service(self):
-        logger.info("\nTesting Price Service...")
-        try:
-            async with httpx.AsyncClient() as client:
-                logger.info("Testing price entry creation...")
-                response = await client.post(
-                    f"{self.price_service_url}/prices",
-                    json=self.test_price
-                )
-                assert response.status_code == 200, f"Price entry creation failed: {response.text}"
 
-                logger.info("Testing price comparison...")
-                response = await client.get(
-                    f"{self.price_service_url}/prices/compare/{self.test_product['id']}"
-                )
-                assert response.status_code == 200, f"Price comparison failed: {response.text}"
 
-                logger.info("Testing product search...")
-                response = await client.get(
-                    f"{self.price_service_url}/products/search",
-                    params={"query": "test"}
-                )
-                assert response.status_code == 200, f"Product search failed: {response.text}"
 
-                return True
-        except Exception as e:
-            logger.error(f"Price service test failed: {str(e)}")
-            return False
+    @async_test()
+    async def test_get_shopping_lists(self):
+        """Test retrieving all shopping lists"""
+        async with httpx.AsyncClient() as client:
+            start_time = time.time()
+            response = await client.get(
+                f"{self.user_service_url}/users/me/shopping-lists",
+                headers={"Authorization": f"Bearer {self.access_token}"}
+            )
+            duration = time.time() - start_time
+            self.record_response_time("get_shopping_lists", duration)
+            
+            assert response.status_code == 200, \
+                f"Shopping list retrieval failed: {response.text}"
+            
+            data = response.json()
+            return {"status": "success", "data": data}
+
+
+
+
+
+
+
+    @async_test()
+    async def test_update_shopping_list(self):
+        """Test updating a shopping list"""
+        lists_result = await self.test_get_shopping_lists()
+        if not lists_result.get("data"):
+            return {"status": "skipped", "reason": "No shopping lists to update"}
+        
+        lists = lists_result["data"]
+        if not lists:
+            return {"status": "skipped", "reason": "No shopping lists to update"}
+        
+        list_id = lists[0]["id"]
+        updated_list = {
+            "name": f"Updated List {self.test_id}",
+            "items": [{"name": "Updated Item", "quantity": 3}]
+        }
+        
+        async with httpx.AsyncClient() as client:
+            start_time = time.time()
+            response = await client.put(
+                f"{self.user_service_url}/users/me/shopping-lists/{list_id}",
+                headers={"Authorization": f"Bearer {self.access_token}"},
+                json=updated_list
+            )
+            duration = time.time() - start_time
+            self.record_response_time("update_shopping_list", duration)
+            
+            assert response.status_code == 200, \
+                f"Shopping list update failed: {response.text}"
+            
+            return {"status": "success", "data": response.json()}
+
+    @async_test()
+    async def test_delete_shopping_list(self):
+        """Test deleting a shopping list"""
+        lists_result = await self.test_get_shopping_lists()
+        if not lists_result.get("data"):
+            return {"status": "skipped", "reason": "No shopping lists to delete"}
+        
+        lists = lists_result["data"]
+        if not lists:
+            return {"status": "skipped", "reason": "No shopping lists to delete"}
+        
+        list_id = lists[0]["id"]
+        
+        async with httpx.AsyncClient() as client:
+            start_time = time.time()
+            response = await client.delete(
+                f"{self.user_service_url}/users/me/shopping-lists/{list_id}",
+                headers={"Authorization": f"Bearer {self.access_token}"}
+            )
+            duration = time.time() - start_time
+            self.record_response_time("delete_shopping_list", duration)
+            
+            assert response.status_code == 200, \
+                f"Shopping list deletion failed: {response.text}"
+            
+            return {"status": "success", "deleted_id": list_id}
+
+
+
+
+
+
+    @async_test()
+    async def test_price_entry_creation(self):
+        """Test creating a new price entry"""
+        async with httpx.AsyncClient() as client:
+            start_time = time.time()
+            response = await client.post(
+                f"{self.price_service_url}/prices",
+                json=self.test_price
+            )
+            duration = time.time() - start_time
+            self.record_response_time("create_price", duration)
+            
+            assert response.status_code == 200, \
+                f"Price entry creation failed: {response.text}"
+            
+            data = response.json()
+            assert data["price"] == self.test_price["price"], \
+                "Price value mismatch"
+            
+            return data
+
+    @async_test()
+    async def test_price_comparison(self):
+        """Test price comparison functionality"""
+        async with httpx.AsyncClient() as client:
+            start_time = time.time()
+            response = await client.get(
+                f"{self.price_service_url}/prices/compare/{self.test_product['id']}"
+            )
+            duration = time.time() - start_time
+            self.record_response_time("price_comparison", duration)
+            
+            assert response.status_code == 200, \
+                f"Price comparison failed: {response.text}"
+            
+            data = response.json()
+            assert "product_id" in data, "Missing product_id in response"
+            assert "price_comparison" in data, "Missing price comparison data"
+            
+            return data
 
     async def run_all_tests(self):
+        """Run all test suites"""
         logger.info("Starting integration tests...")
-
-        if not await self.wait_for_services():
-            logger.error("Services are not ready. Aborting tests.")
+        
+        try:
+            # Authentication Suite
+            await self.start_test_suite("Authentication Tests")
+            auth_results = [
+                await self.test_auth_service_register(),
+                await self.test_auth_service_login()
+            ]
+            self.current_suite.results.extend(auth_results)
+            await self.end_test_suite()
+            
+            # Shopping Lists Suite
+            await self.start_test_suite("Shopping Lists Tests")
+            if self.access_token:
+                shopping_results = [
+                    await self.test_create_shopping_list(),
+                    await self.test_get_shopping_lists(),
+                    await self.test_update_shopping_list(),
+                    await self.test_delete_shopping_list()
+                ]
+                self.current_suite.results.extend(shopping_results)
+            else:
+                logger.error("Skipping shopping list tests - no access token")
+            await self.end_test_suite()
+            
+            # Price Service Suite
+            await self.start_test_suite("Price Service Tests")
+            price_results = [
+                await self.test_price_entry_creation(),
+                await self.test_price_comparison()
+            ]
+            self.current_suite.results.extend(price_results)
+            await self.end_test_suite()
+            
+            # Print overall metrics
+            await self.print_performance_metrics()
+            
+            # Calculate overall success
+            total_tests = sum(len(suite.results) for suite in self.test_suites)
+            passed_tests = sum(
+                sum(1 for r in suite.results if r.status == TestStatus.PASSED)
+                for suite in self.test_suites
+            )
+            
+            logger.info(f"\nOverall Results: {passed_tests}/{total_tests} tests passed")
+            
+            return passed_tests == total_tests
+            
+        except Exception as e:
+            logger.error(f"Error during test execution: {e}")
+            logger.error(traceback.format_exc())
             return False
 
-        test_results = {
-            "Auth Service": await self.test_auth_service(),
-            "User Service": await self.test_user_service(),
-            "Price Service": await self.test_price_service()
-        }
 
-        logger.info("\nTest Results:")
-        for service, success in test_results.items():
-            status = "✓ Passed" if success else "✗ Failed"
-            logger.info(f"{service}: {status}")
 
-        return all(test_results.values())
+
 
 async def main():
     tester = ServiceTester()

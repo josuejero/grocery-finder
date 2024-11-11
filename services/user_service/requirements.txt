@@ -1,11 +1,11 @@
 alembic>=1.7.1
-asyncpg>=0.25.0  # Async PostgreSQL driver
+asyncpg>=0.25.0
 emails>=0.6
-# User Service dependencies
 fastapi>=0.68.0
 passlib[bcrypt]>=1.7.4
 psycopg2-binary>=2.9.1
-pydantic[email]>=1.8.2  # Updated line with [email] extra
+pydantic>=1.8.2
+pydantic-settings>=2.0.0
 python-dotenv>=0.19.0
 python-jose[cryptography]>=3.3.0
 python-multipart>=0.0.5
@@ -16,4 +16,6 @@ pytest
 pytest-asyncio 
 pytest-cov 
 httpx
-PyJWT>=2.4.0  # Added in the previous step
+PyJWT>=2.4.0
+bcrypt>=3.2.0
+email-validator>=1.1.3

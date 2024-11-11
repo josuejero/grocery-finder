@@ -89,6 +89,8 @@ services:
       retries: 3
       start_period: 40s
 
+
+
   user_service:
     <<: *service-common
     container_name: grocery_finder_user_service
@@ -110,6 +112,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
     volumes:
       - ../services/user_service:/app:ro
+      - user_service_logs:/var/log/user_service  # Add this line
     depends_on:
       postgres:
         condition: service_healthy
@@ -119,6 +122,7 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
 
   price_service:
     <<: *service-common
@@ -217,6 +221,8 @@ volumes:
     name: grocery_finder_postgres_data
   redis_data:
     name: grocery_finder_redis_data
+  user_service_logs:
+    name: grocery_finder_user_service_logs
   api_gateway_logs:
 
 networks:
