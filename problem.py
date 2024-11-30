@@ -69,7 +69,7 @@ except IOError as e:
     print(f"Error writing to '{output_file_path}': {e}")
     sys.exit(1)
 
-exclude_dirs = {"node_modules", ".next", "venv", ".git", "__pycache__"}
+exclude_dirs = {"node_modules", ".next", "venv", ".git", "__pycache__", ".pytest_cache"}
 exclude_files = {"package-lock.json", output_file_path}
 
 allowed_extensions = {

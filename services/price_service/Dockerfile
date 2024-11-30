@@ -15,6 +15,12 @@ RUN apt-get update && \
         python3-dev \
         libpq-dev \
         netcat-traditional \
+        iputils-ping \
+        dnsutils \
+        net-tools \
+        telnet \
+        procps \
+        vim \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir --upgrade pip
 

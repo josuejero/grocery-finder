@@ -220,6 +220,65 @@ async def register(user: UserCreate):
     except httpx.RequestError as e:
         logger.error(f"Auth service request failed: {e}")
         raise HTTPException(status_code=503, detail="Auth service unavailable")
+    
+@app.post("/users/sync")
+async def sync_user(
+    username: str,
+    authorization: str = Header(...),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+):
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                f"{USER_SERVICE_URL}/users/sync?username={username}",
+                headers={"Authorization": authorization}
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.RequestError as e:
+        logger.error(f"User service sync request failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="User service unavailable"
+        )
+
+@app.get("/users/me")
+async def get_user_profile(authorization: str = Header(...)):
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{USER_SERVICE_URL}/users/me",
+                headers={"Authorization": authorization}
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.RequestError as e:
+        logger.error(f"User service request failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="User service unavailable"
+        )
+
+@app.post("/users/me/shopping-lists")
+async def create_shopping_list(
+    shopping_list: dict,
+    authorization: str = Header(...),
+):
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                f"{USER_SERVICE_URL}/users/me/shopping-lists",
+                headers={"Authorization": authorization},
+                json=shopping_list
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.RequestError as e:
+        logger.error(f"User service request failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="User service unavailable"
+        )
 
 if __name__ == "__main__":
     import uvicorn
