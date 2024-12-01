@@ -1,14 +1,12 @@
 import logging
 import os
 import sys
-from datetime import datetime, timedelta
-import datetime as dt
-from datetime import UTC
+from datetime import datetime, UTC
 from typing import Dict, Optional
 import httpx
 import jwt
 import redis.asyncio as redis 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status, Header, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from prometheus_client import Counter, Histogram
@@ -278,6 +276,124 @@ async def create_shopping_list(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="User service unavailable"
+        )
+
+@app.get("/users/me/shopping-lists")
+async def get_shopping_lists(authorization: str = Header(...)):
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{USER_SERVICE_URL}/users/me/shopping-lists",
+                headers={"Authorization": authorization}
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.RequestError as e:
+        logger.error(f"User service request failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="User service unavailable"
+        )
+
+
+@app.delete("/users/me/shopping-lists/{list_id}")
+async def delete_shopping_list(
+    list_id: int,
+    authorization: str = Header(...)
+):
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.delete(
+                f"{USER_SERVICE_URL}/users/me/shopping-lists/{list_id}",
+                headers={"Authorization": authorization}
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPError as e:
+        if e.response.status_code == 404:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Shopping list not found"
+            )
+        logger.error(f"User service request failed: {e}")
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail=e.response.text
+        )
+    except Exception as e:
+        logger.error(f"Failed to delete shopping list: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@app.put("/users/me/shopping-lists/{list_id}")
+async def update_shopping_list(
+    list_id: int,
+    shopping_list: dict,
+    authorization: str = Header(...)
+):
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.put(
+                f"{USER_SERVICE_URL}/users/me/shopping-lists/{list_id}",
+                headers={"Authorization": authorization},
+                json=shopping_list
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPError as e:
+        if e.response.status_code == 404:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Shopping list not found"
+            )
+        logger.error(f"User service request failed: {e}")
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail=e.response.text
+        )
+    except Exception as e:
+        logger.error(f"Failed to update shopping list: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+        
+# Previous imports and code remain the same...
+
+# Add after other endpoints
+@app.post("/prices")
+async def create_price_entry(price_entry: dict):
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                f"{PRICE_SERVICE_URL}/prices",
+                json=price_entry
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.RequestError as e:
+        logger.error(f"Price service request failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Price service unavailable"
+        )
+
+@app.get("/prices/compare/{product_id}")
+async def compare_prices(product_id: str):
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{PRICE_SERVICE_URL}/prices/compare/{product_id}"
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.RequestError as e:
+        logger.error(f"Price service request failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Price service unavailable"
         )
 
 if __name__ == "__main__":

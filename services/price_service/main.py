@@ -2,11 +2,10 @@ import logging
 import os
 import sys
 from datetime import datetime
-import datetime as dt
 try:
     from datetime import UTC
 except ImportError:
-    UTC = dt.timezone.utc
+    from datetime import timezone as UTC
 from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException, status
@@ -48,6 +47,7 @@ class Store(BaseModel):
     name: str
     location: str
     address: str
+    active: bool = True
 
 class Product(BaseModel):
     id: str
@@ -73,13 +73,13 @@ async def shutdown_db_client():
     app.mongodb_client.close()
 
 async def setup_indexes():
+    await app.mongodb.stores.create_index("id", unique=True)
+    await app.mongodb.products.create_index("id", unique=True)
     await app.mongodb.prices.create_index([
         ("store_id", 1),
         ("product_id", 1),
         ("timestamp", -1)
     ])
-    await app.mongodb.stores.create_index("name")
-    await app.mongodb.products.create_index("name")
 
 @app.get("/health")
 async def health_check():
@@ -95,6 +95,55 @@ async def health_check():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database connection failed",
+        )
+
+@app.post("/stores")
+async def create_store(store: dict):
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                f"{PRICE_SERVICE_URL}/stores",
+                json=store
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.RequestError as e:
+        logger.error(f"Price service request failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Price service unavailable"
+        )
+
+@app.get("/stores/{store_id}")
+async def get_store(store_id: str):
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{PRICE_SERVICE_URL}/stores/{store_id}"
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.RequestError as e:
+        logger.error(f"Price service request failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Price service unavailable"
+        )
+
+@app.get("/stores")
+async def list_stores():
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{PRICE_SERVICE_URL}/stores"
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.RequestError as e:
+        logger.error(f"Price service request failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Price service unavailable"
         )
 
 @app.post("/prices", response_model=PriceEntry)
