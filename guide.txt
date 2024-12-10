@@ -1,0 +1,153 @@
+Cheapest Grocery Finder - Technical Implementation Guide
+Table of Contents
+
+System Architecture
+Backend Services Implementation
+Frontend Development
+Machine Learning Integration
+Infrastructure Setup
+Development Workflow
+Testing Strategy
+Security & Authentication
+
+System Architecture
+Microservices Overview
+The system uses a microservices architecture running locally with Docker for development:
+Copy┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│   API Gateway   │────▶│  Auth Service   │     │  Price Service  │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+         │                       │                       │
+         │               ┌─────────────────┐            │
+         └──────────────▶│  User Service  │◀────────────┘
+                        └─────────────────┘
+                               │
+                        ┌─────────────────┐
+                        │ ML Price Pred.  │
+                        └─────────────────┘
+Service Breakdown
+API Gateway Service
+
+Role: Routes requests to microservices, handles request/response transformation, rate limiting
+Technology: FastAPI
+Local Setup: Docker container running on port 8000
+
+Auth Service
+
+Role: Manages user authentication, JWT token generation/validation
+Technology: FastAPI + JWT + MongoDB
+Local Setup: Docker container with MongoDB instance
+
+User Service
+
+Role: Manages user profiles, preferences, shopping lists
+Technology: FastAPI + PostgreSQL
+Local Setup: Docker container with PostgreSQL instance
+
+Price Service
+
+Role: Manages grocery price data, store information, price comparison
+Technology: FastAPI + MongoDB
+Local Setup: Docker container sharing MongoDB instance with Auth Service
+
+ML Price Prediction Service
+
+Role: Price trend analysis and predictions
+Technology: FastAPI + TensorFlow + MongoDB
+Local Setup: Docker container with model files stored locally
+
+Infrastructure Setup
+Local Development Environment
+Prerequisites
+
+Docker and Docker Compose
+Python 3.12+
+Node.js 16+ (for frontend)
+Git
+
+Database Setup
+
+PostgreSQL container for User Service
+MongoDB container shared between Auth and Price services
+Redis container for caching and rate limiting
+
+Docker Configuration
+Each service has its own Dockerfile and shares the same Docker network:
+
+API Gateway: Port 8000
+Auth Service: Port 8001
+User Service: Port 8002
+Price Service: Port 8003
+MongoDB: Port 27017
+PostgreSQL: Port 5432
+Redis: Port 6379
+
+Development Workflow
+Local Setup Steps
+
+Clone repository:
+
+bashCopygit clone https://github.com/yourusername/grocery-finder.git
+cd grocery-finder
+
+Create environment files:
+
+bashCopycp .env.example .env
+# Edit .env with local development values
+
+Start services:
+
+bashCopydocker-compose up -d
+
+Initialize databases:
+
+bashCopydocker-compose exec user_service python init_db.py
+docker-compose exec auth_service python init_db.py
+Development Process
+
+Create feature branch from main
+Develop and test locally with Docker Compose
+Run test suite
+Create PR for review
+Merge after approval
+
+Testing Strategy
+
+Unit tests with pytest
+Integration tests with TestClient
+E2E tests with Cypress
+Load testing with k6
+
+Security & Authentication
+Local Security Setup
+
+JWT for session management
+bcrypt for password hashing
+Rate limiting with Redis
+CORS configuration for local development
+Environment variables for sensitive data
+
+Authentication Flow
+
+User registration/login through Auth Service
+JWT token generation
+Token validation middleware in API Gateway
+Service-to-service authentication with shared secrets
+
+Monitoring and Logging
+Local Development Tools
+
+Logging to stdout and files
+Prometheus metrics
+Grafana dashboards (optional)
+MongoDB Compass for database monitoring
+pgAdmin for PostgreSQL management
+
+Future AWS Migration Path
+When ready to move to AWS, the following migrations will be implemented:
+
+PostgreSQL → Amazon RDS
+MongoDB → MongoDB Atlas or Amazon DocumentDB
+Redis → Amazon ElastiCache
+Container hosting → ECS/EKS
+API Gateway → Amazon API Gateway
+Authentication → Amazon Cognito

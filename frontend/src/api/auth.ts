@@ -1,5 +1,5 @@
-import type { LoginCredentials, RegisterCredentials, AuthResponse, User } from '@/types/auth';
-import { API_BASE_URL } from '@/lib/utils';
+import type { LoginCredentials, RegisterCredentials, AuthResponse, User } from "@/types/auth";
+import { API_BASE_URL } from "@/lib/utils";
 
 const AUTH_ENDPOINTS = {
   login: `${API_BASE_URL}/auth/login`,
@@ -10,21 +10,20 @@ const AUTH_ENDPOINTS = {
 export const authApi = {
   async login(credentials: LoginCredentials): Promise<AuthResponse> {
     const formData = new URLSearchParams();
-    formData.append('username', credentials.username);
-    formData.append('password', credentials.password);
-    formData.append('grant_type', 'password');
+    formData.append("username", credentials.username);
+    formData.append("password", credentials.password);
 
     const response = await fetch(AUTH_ENDPOINTS.login, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
+        "Content-Type": "application/x-www-form-urlencoded",
       },
       body: formData,
     });
 
     if (!response.ok) {
       const error = await response.json();
-      throw new Error(error.detail || 'Failed to login');
+      throw new Error(error.detail || "Failed to login");
     }
 
     return response.json();
@@ -32,16 +31,16 @@ export const authApi = {
 
   async register(credentials: RegisterCredentials): Promise<User> {
     const response = await fetch(AUTH_ENDPOINTS.register, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
       body: JSON.stringify(credentials),
     });
 
     if (!response.ok) {
       const error = await response.json();
-      throw new Error(error.detail || 'Failed to register');
+      throw new Error(error.detail || "Failed to register");
     }
 
     return response.json();
@@ -55,7 +54,7 @@ export const authApi = {
     });
 
     if (!response.ok) {
-      throw new Error('Failed to get user profile');
+      throw new Error("Failed to get user profile");
     }
 
     return response.json();

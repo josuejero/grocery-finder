@@ -83,7 +83,6 @@ allowed_extensions = {
     ".css",
     ".module.css",
     ".scss",
-    ".txt",
     ".yml",
     ".yaml",
     ".tf",

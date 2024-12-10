@@ -1,7 +1,7 @@
-import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
-import type { AuthStore, LoginCredentials, RegisterCredentials } from '@/types/auth';
-import { authApi } from '@/api/auth';
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
+import type { AuthStore, LoginCredentials, RegisterCredentials } from "@/types/auth";
+import { authApi } from "@/api/auth";
 
 export const useAuthStore = create<AuthStore>()(
   persist(
@@ -24,7 +24,9 @@ export const useAuthStore = create<AuthStore>()(
             error: null,
           });
         } catch (error) {
-          set({ error: error instanceof Error ? error.message : 'Failed to login' });
+          set({
+            error: error instanceof Error ? error.message : "Failed to login",
+          });
         } finally {
           set({ isLoading: false });
         }
@@ -34,13 +36,16 @@ export const useAuthStore = create<AuthStore>()(
         set({ isLoading: true, error: null });
         try {
           await authApi.register(credentials);
-          // After registration, login the user
           await useAuthStore.getState().login({
             username: credentials.username,
             password: credentials.password,
           });
         } catch (error) {
-          set({ error: error instanceof Error ? error.message : 'Failed to register' });
+          set({
+            error: error instanceof Error
+              ? error.message
+              : "Failed to register",
+          });
         } finally {
           set({ isLoading: false });
         }
@@ -60,7 +65,7 @@ export const useAuthStore = create<AuthStore>()(
       },
     }),
     {
-      name: 'auth-storage',
+      name: "auth-storage",
       partialize: (state) => ({
         user: state.user,
         token: state.token,
