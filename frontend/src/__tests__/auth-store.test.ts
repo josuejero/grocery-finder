@@ -16,18 +16,21 @@ describe('Auth Store', () => {
     // Mock the login function
     mockedAuthApi.login.mockResolvedValue({
       access_token: 'fake-token',
+      token_type: 'Bearer',
     });
 
     // Mock the getCurrentUser function
     mockedAuthApi.getCurrentUser.mockResolvedValue({
       id: '1',
       username: 'testuser',
-      // Add other user properties as needed
+      email: 'testuser@example.com', // Added email field
     });
 
     // Mock the register function
     mockedAuthApi.register.mockResolvedValue({
-      // Define the return value of register if it returns anything
+      id: '1',
+      username: 'testuser',
+      email: 'testuser@example.com', // Added email field
     });
   });
 
@@ -62,7 +65,7 @@ describe('Auth Store', () => {
     expect(result.current.user).toEqual({
       id: '1',
       username: 'testuser',
-      // Ensure all expected user properties are present
+      email: 'testuser@example.com', // Ensure email is included
     });
     expect(result.current.error).toBeNull();
     expect(result.current.isLoading).toBeFalsy();

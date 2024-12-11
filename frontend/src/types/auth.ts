@@ -1,4 +1,5 @@
 export interface User{
+  id?: string;  // Adding this line
   username:string;
   email:string;
   full_name?: string;
