@@ -2,11 +2,10 @@ import logging
 import os
 import sys
 from datetime import datetime, timedelta
-import datetime as dt
 try:
     from datetime import UTC
 except ImportError:
-    UTC = dt.timezone.utc
+    from datetime import timezone as UTC
 from typing import Optional
 
 import jwt
@@ -57,11 +56,11 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "
 BCRYPT_SALT_ROUNDS = int(os.getenv("BCRYPT_SALT_ROUNDS", "12"))
 
 pwd_context = CryptContext(
-    schemes=["bcrypt"], 
-    deprecated="auto", 
-    bcrypt__rounds=BCRYPT_SALT_ROUNDS
+    schemes=["bcrypt"],
+    deprecated="auto",
+    bcrypt__default_rounds=BCRYPT_SALT_ROUNDS
 )
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 class Token(BaseModel):
     access_token: str
@@ -99,10 +98,17 @@ async def get_user(username: str):
 async def authenticate_user(username: str, password: str):
     user = await get_user(username)
     if not user:
+        logger.error(f"User not found: {username}")
         return False
-    if not verify_password(password, user.hashed_password):
+    
+    try:
+        if not verify_password(password, user.hashed_password):
+            logger.error(f"Password verification failed for user: {username}")
+            return False
+        return user
+    except Exception as e:
+        logger.error(f"Password verification error: {str(e)}")
         return False
-    return user
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
@@ -126,7 +132,12 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         if username is None:
             raise credentials_exception
         token_data = TokenData(username=username)
-    except (jwt.PyJWTError, jwt.ExpiredSignatureError):
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired"
+        )
+    except jwt.PyJWTError:
         raise credentials_exception
     user = await get_user(username=token_data.username)
     if user is None:
@@ -135,17 +146,6 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
 
 @app.post("/register", response_model=User)
 async def register_user(user: UserCreate):
-    if await app.mongodb.users.find_one({"username": user.username}):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username already registered",
-        )
-    if await app.mongodb.users.find_one({"email": user.email}):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered",
-        )
-
     user_dict = user.model_dump()
     hashed_password = get_password_hash(user_dict.pop("password"))
     user_dict["hashed_password"] = hashed_password
@@ -153,15 +153,27 @@ async def register_user(user: UserCreate):
     try:
         new_user = await app.mongodb.users.insert_one(user_dict)
         created_user = await app.mongodb.users.find_one({"_id": new_user.inserted_id})
+        logger.info(f"Created new user: {user_dict['username']}")
         return User(**created_user)
     except Exception as e:
         logger.error(f"Failed to create user: {e}")
+        if "duplicate key error" in str(e):
+            if "username" in str(e):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Username already registered"
+                )
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Email already registered"
+                )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create user",
+            detail="Failed to create user"
         )
 
-@app.post("/login", response_model=Token)
+@app.post("/token", response_model=Token)
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     try:
         user = await authenticate_user(form_data.username, form_data.password)

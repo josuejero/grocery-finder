@@ -165,13 +165,14 @@ async def health_check():
             "error": str(e)
         }
 
-@app.post("/auth/login", response_model=Token)
+# In the section where routes are defined, make sure you have:
+
+@app.post("/auth/login")
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    logger.debug(f"Login attempt for user: {form_data.username}")
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient() as client:
             response = await client.post(
-                f"{AUTH_SERVICE_URL}/login",
+                f"{AUTH_SERVICE_URL}/token",  # Note: This maps /auth/login to /token
                 data={
                     "username": form_data.username,
                     "password": form_data.password,
@@ -190,6 +191,9 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     except httpx.RequestError as e:
         logger.error(f"Auth service request failed: {e}")
         raise HTTPException(status_code=503, detail="Auth service unavailable")
+
+
+
 
 @app.post("/auth/register", response_model=User)
 async def register(user: UserCreate):
