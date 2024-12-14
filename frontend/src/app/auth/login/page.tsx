@@ -21,8 +21,9 @@ export default function LoginPage() {
     try {
       await login(data);
       alert("Login successful");
-    } catch (err) {
-      alert(err);
+      window.location.href = "/dashboard";
+    } catch {
+      alert("Login failed. Please try again.");
     }
   };
 

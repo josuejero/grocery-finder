@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { AuthStore, LoginCredentials, RegisterCredentials } from "@/types/auth";
+import type { AuthStore, RegisterCredentials, LoginCredentials } from "@/types/auth";
 import { authApi } from "@/api/auth";
 
 export const useAuthStore = create<AuthStore>()(
@@ -16,16 +16,19 @@ export const useAuthStore = create<AuthStore>()(
         set({ isLoading: true, error: null });
         try {
           const authResponse = await authApi.login(credentials);
-          const user = await authApi.getCurrentUser(authResponse.access_token);
           set({
-            user,
             token: authResponse.access_token,
             isAuthenticated: true,
             error: null,
           });
-        } catch (error) {
+          // Fetch and store user details
+          const user = await authApi.getCurrentUser(authResponse.access_token);
+          set({ user });
+        } catch (error: unknown) {
           set({
-            error: error instanceof Error ? error.message : "Failed to login",
+            error: error instanceof Error
+              ? error.message
+              : "Login failed",
           });
         } finally {
           set({ isLoading: false });
@@ -36,15 +39,9 @@ export const useAuthStore = create<AuthStore>()(
         set({ isLoading: true, error: null });
         try {
           await authApi.register(credentials);
-          await useAuthStore.getState().login({
-            username: credentials.username,
-            password: credentials.password,
-          });
-        } catch (error) {
+        } catch (error: unknown) {
           set({
-            error: error instanceof Error
-              ? error.message
-              : "Failed to register",
+            error: error instanceof Error ? error.message : "Failed to register",
           });
         } finally {
           set({ isLoading: false });
@@ -52,12 +49,7 @@ export const useAuthStore = create<AuthStore>()(
       },
 
       logout: () => {
-        set({
-          user: null,
-          token: null,
-          isAuthenticated: false,
-          error: null,
-        });
+        set({ user: null, token: null, isAuthenticated: false });
       },
 
       clearError: () => {
@@ -67,7 +59,6 @@ export const useAuthStore = create<AuthStore>()(
     {
       name: "auth-storage",
       partialize: (state) => ({
-        user: state.user,
         token: state.token,
         isAuthenticated: state.isAuthenticated,
       }),

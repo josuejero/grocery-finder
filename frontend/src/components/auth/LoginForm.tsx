@@ -27,7 +27,9 @@ export default function LoginForm() {
     try {
       setError(null);
       await login(data);
-      router.push("/dashboard");
+      console.log("Before redirecting to /dashboard");
+      router.push('/dashboard'); // Confirm this executes
+      console.log("After redirecting to /dashboard");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     }

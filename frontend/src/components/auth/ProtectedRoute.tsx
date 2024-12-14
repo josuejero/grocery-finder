@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useEffect } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { useAuthStore } from "@/store/auth";
 import { useRouter } from "next/navigation";
 
@@ -9,17 +9,23 @@ interface ProtectedRouteProps {
 }
 
 export default function ProtectedRoute({ children }: ProtectedRouteProps) {
-  const { isAuthenticated } = useAuthStore();
+  const { isAuthenticated, token, isLoading } = useAuthStore();
   const router = useRouter();
+  const [isHydrated, setIsHydrated] = useState(false);
+
+  // Wait for zustand state hydration
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (isHydrated && !isLoading && (!isAuthenticated || !token)) {
       router.push("/auth/login");
     }
-  }, [isAuthenticated, router]);
+  }, [isAuthenticated, isLoading, isHydrated, router, token]);
 
-  if (!isAuthenticated) {
-    return null; // Optionally, add a loading spinner here
+  if (!isHydrated || isLoading) {
+    return <div>Loading...</div>; // Prevent rendering children until state is ready
   }
 
   return <>{children}</>;
