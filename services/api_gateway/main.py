@@ -197,32 +197,68 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
 
 @app.post("/auth/register", response_model=User)
 async def register(user: UserCreate):
-    logger.debug(f"Registration attempt for user: {user.username}")
     try:
+        # 1. Register with auth service
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(
+            auth_response = await client.post(
                 f"{AUTH_SERVICE_URL}/register",
                 json=user.model_dump(),
                 headers={"Content-Type": "application/json"}
             )
-
-            if response.status_code == 400:
+            
+            if auth_response.status_code != 200:
                 raise HTTPException(
-                    status_code=400,
-                    detail=response.json().get("detail", "Registration failed")
+                    status_code=auth_response.status_code,
+                    detail=auth_response.text
+                )
+                
+            auth_user = auth_response.json()
+            
+            # 2. Get JWT token for user sync
+            login_response = await client.post(
+                f"{AUTH_SERVICE_URL}/token",  # Changed from /login to /token
+                data={
+                    "username": user.username,
+                    "password": user.password,
+                    "grant_type": "password"
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"}
+            )   
+            
+            if login_response.status_code != 200:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to get auth token for sync"
+                )
+            
+            token = login_response.json()["access_token"]
+
+            # 3. Sync with user service
+            sync_response = await client.post(
+                f"{USER_SERVICE_URL}/users/sync",
+                params={"username": user.username},
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json"
+                }
+            )
+            
+            if sync_response.status_code != 200:
+                logger.error(f"User sync failed: {sync_response.text}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to sync user"
                 )
 
-            if response.status_code != 200:
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail="Registration failed"
-                )
+            return auth_user
 
-            return response.json()
     except httpx.RequestError as e:
-        logger.error(f"Auth service request failed: {e}")
-        raise HTTPException(status_code=503, detail="Auth service unavailable")
-    
+        logger.error(f"Service request failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(e)
+        )
+
 @app.post("/users/sync")
 async def sync_user(
     username: str,

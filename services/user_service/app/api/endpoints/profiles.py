@@ -71,9 +71,10 @@ async def sync_user(
     db: Session = Depends(get_db)
 ):
     try:
-        # Verify the token - but don't require user exists yet since we're creating it
+        # Verify the token
         try:
-            payload = await verify_token(authorization.replace("Bearer ", ""))
+            token = authorization.replace("Bearer ", "")
+            payload = await verify_token(token)
             if payload.get("sub") != username:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,

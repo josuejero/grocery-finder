@@ -6,10 +6,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import router
-from app.core.config import Settings
-from app.core.logging import setup_logging
-from app.db.database import init_db, Base, engine
 from app.core.config import get_settings
+from app.core.logging import setup_logging
+from app.db.database import init_db, Base
 
 settings = get_settings()
 logger = setup_logging()
@@ -50,9 +49,6 @@ app.add_middleware(
 )
 
 app.include_router(router)
-
-def get_application():
-    return app
 
 if __name__ == "__main__":
     import uvicorn

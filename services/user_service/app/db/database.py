@@ -1,3 +1,5 @@
+import logging
+import sys
 import time
 from typing import AsyncGenerator, Optional, Tuple
 from sqlalchemy import create_engine, text
@@ -11,36 +13,29 @@ from app.core.logging import logger
 
 settings = get_settings()
 
-# Shared instances
-engine = None
-SessionLocal = None
 Base = declarative_base()
 
 def get_engine():
-    global engine
-    if engine is None:
-        engine = create_engine(
-            settings.sync_database_url,
-            pool_size=5,
-            max_overflow=10,
-            pool_timeout=30,
-            pool_pre_ping=True
-        )
-    return engine
+    database_url = settings.sync_database_url
+    logger.info(f"Connecting to database: {database_url}")
+    return create_engine(
+        database_url,
+        pool_size=5,
+        max_overflow=10,
+        pool_timeout=30,
+        pool_pre_ping=True
+    )
 
 def get_session_maker():
-    global SessionLocal
-    if SessionLocal is None:
-        SessionLocal = sessionmaker(
-            autocommit=False,
-            autoflush=False,
-            bind=get_engine()
-        )
-    return SessionLocal
+    return sessionmaker(
+        autocommit=False,
+        autoflush=False,
+        bind=get_engine()
+    )
 
 async def init_db(retries=5, delay=5) -> Tuple[object, object]:
-    """Initialize database connection."""
-    global engine, SessionLocal
+    """Initialize database connection with retries."""
+    last_exception = None
     
     for attempt in range(retries):
         try:
@@ -51,27 +46,27 @@ async def init_db(retries=5, delay=5) -> Tuple[object, object]:
             
             # Test the connection
             with engine.connect() as conn:
-                logger.debug("Testing database connection")
                 result = conn.execute(text("SELECT 1")).scalar()
                 logger.debug(f"Database test query result: {result}")
             
             # Create tables
             Base.metadata.create_all(bind=engine)
-            logger.debug("Created database tables")
+            logger.info("Database initialized successfully")
             
             return engine, SessionLocal
             
         except OperationalError as e:
+            last_exception = e
             logger.error(f"Database connection error on attempt {attempt + 1}: {e}")
             if attempt < retries - 1:
                 logger.info(f"Retrying in {delay} seconds...")
                 time.sleep(delay)
-            else:
-                logger.error("Max retries reached, cannot connect to database")
-                raise
         except Exception as e:
             logger.error(f"Unexpected database initialization error: {e}", exc_info=True)
             raise
+
+    logger.error("Max retries reached, cannot connect to database")
+    raise last_exception
 
 def get_db():
     """Dependency for database session."""
