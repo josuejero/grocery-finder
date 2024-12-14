@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 interface CreateListDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onSuccess: () => Promise<void>;
 }
 
 export default function CreateListDialog({ open, onOpenChange }: CreateListDialogProps) {

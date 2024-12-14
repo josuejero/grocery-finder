@@ -16,24 +16,31 @@ export const useAuthStore = create<AuthStore>()(
         set({ isLoading: true, error: null });
         try {
           const authResponse = await authApi.login(credentials);
+          
+          // Store token in both localStorage and state
+          const token = authResponse.access_token;
+          localStorage.setItem("auth-token", token);
+          console.log('🔑 Token stored:', token.substring(0, 20) + '...');
+          
           set({
-            token: authResponse.access_token,
+            token,
             isAuthenticated: true,
             error: null,
           });
-          // Fetch and store user details
-          const user = await authApi.getCurrentUser(authResponse.access_token);
+          
+          const user = await authApi.getCurrentUser(token);
           set({ user });
-        } catch (error: unknown) {
+        } catch (error: unknown) { // Changed from 'any' to 'unknown'
+          console.error('❌ Login error:', error);
+          localStorage.removeItem("auth-token"); // Clean up on error
           set({
-            error: error instanceof Error
-              ? error.message
-              : "Login failed",
+            error: error instanceof Error ? error.message : "Login failed",
           });
         } finally {
           set({ isLoading: false });
         }
       },
+
 
       register: async (credentials: RegisterCredentials) => {
         set({ isLoading: true, error: null });
@@ -49,6 +56,7 @@ export const useAuthStore = create<AuthStore>()(
       },
 
       logout: () => {
+        localStorage.removeItem("auth-token");
         set({ user: null, token: null, isAuthenticated: false });
       },
 

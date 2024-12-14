@@ -1,11 +1,8 @@
+"use client";
+
 import Link from "next/link";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-
-interface ShoppingList {
-  id: string;
-  name: string;
-  items: Array<{ name: string; quantity: number }>;
-}
+import type { ShoppingList } from "@/types/shopping";
 
 interface ListsGridProps {
   lists: ShoppingList[];
