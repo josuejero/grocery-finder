@@ -1,3 +1,5 @@
+// frontend/src/app/shopping-lists/[id]/page.tsx
+
 "use client";
 
 import { useEffect, useState } from "react";
@@ -6,64 +8,57 @@ import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-
-interface ShoppingListItem {
-  name: string;
-  quantity: number;
-  notes?: string;
-}
-
-interface ShoppingList {
-  id: string;
-  name: string;
-  items: ShoppingListItem[];
-}
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { getShoppingList, updateShoppingList } from "@/api/shopping-lists";
+import type { ShoppingList } from "@/types/shopping";
 
 export default function ShoppingListDetailPage() {
   const params = useParams();
   const [list, setList] = useState<ShoppingList | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [newItem, setNewItem] = useState({ name: "", quantity: 1 });
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchList = async () => {
       try {
-        const response = await fetch(`/api/shopping-lists/${params.id}`);
-        const data = await response.json();
+        setIsLoading(true);
+        setError(null);
+        
+        if (!params?.id) {
+          throw new Error("No shopping list ID provided");
+        }
+
+        const data = await getShoppingList(Number(params.id));
         setList(data);
       } catch (error) {
         console.error("Failed to fetch shopping list:", error);
+        setError("Failed to load shopping list. Please try again later.");
       } finally {
         setIsLoading(false);
       }
     };
 
-    if (params.id) {
+    if (params?.id) {
       fetchList();
     }
-  }, [params.id]);
+  }, [params?.id]);
 
   const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!list || !newItem.name) return;
 
     try {
-      const response = await fetch(`/api/shopping-lists/${list.id}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          ...list,
-          items: [...list.items, newItem],
-        }),
+      setError(null);
+      const updatedItems = [...list.items, newItem];
+      const updatedList = await updateShoppingList(list.id, {
+        items: updatedItems
       });
-
-      const updatedList = await response.json();
       setList(updatedList);
       setNewItem({ name: "", quantity: 1 });
     } catch (error) {
       console.error("Failed to add item:", error);
+      setError("Failed to add item. Please try again.");
     }
   };
 
@@ -71,22 +66,15 @@ export default function ShoppingListDetailPage() {
     if (!list) return;
 
     try {
+      setError(null);
       const updatedItems = list.items.filter((_, i) => i !== index);
-      const response = await fetch(`/api/shopping-lists/${list.id}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          ...list,
-          items: updatedItems,
-        }),
+      const updatedList = await updateShoppingList(list.id, {
+        items: updatedItems
       });
-
-      const updatedList = await response.json();
       setList(updatedList);
     } catch (error) {
       console.error("Failed to delete item:", error);
+      setError("Failed to delete item. Please try again.");
     }
   };
 
@@ -94,6 +82,16 @@ export default function ShoppingListDetailPage() {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-lg">Loading...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="container mx-auto p-4">
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       </div>
     );
   }

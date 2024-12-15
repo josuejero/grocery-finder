@@ -1,3 +1,5 @@
+// frontend/src/api/auth.ts
+
 import type { LoginCredentials, RegisterCredentials, AuthResponse, User } from "@/types/auth";
 import { API_BASE_URL } from "@/lib/utils";
 
@@ -19,6 +21,7 @@ export const authApi = {
         "Content-Type": "application/x-www-form-urlencoded",
       },
       body: formData,
+      credentials: "include", // Ensure cookies are included if needed
     });
 
     if (!response.ok) {
@@ -26,7 +29,10 @@ export const authApi = {
       throw new Error(error.detail || "Failed to login");
     }
 
-    return response.json();
+    const data: AuthResponse = await response.json();
+    // Store token securely, e.g., in HttpOnly cookies or secure storage
+    localStorage.setItem("token", data.access_token);
+    return data;
   },
 
   async register(credentials: RegisterCredentials): Promise<User> {
@@ -36,6 +42,7 @@ export const authApi = {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(credentials),
+      credentials: "include",
     });
 
     if (!response.ok) {
@@ -51,6 +58,7 @@ export const authApi = {
       headers: {
         Authorization: `Bearer ${token}`,
       },
+      credentials: "include",
     });
 
     if (!response.ok) {

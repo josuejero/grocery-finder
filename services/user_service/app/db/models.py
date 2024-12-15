@@ -31,9 +31,9 @@ class UserModel(Base):
     __tablename__ = "users"
     
     id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True)
-    email = Column(String, unique=True, index=True)
-    full_name = Column(String)
+    username = Column(String, unique=True, index=True, nullable=False)
+    email = Column(String, unique=True, index=True, nullable=False)
+    full_name = Column(String, nullable=True)
     preferences = Column(JSON, default={})
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), default=datetime.now(UTC))
@@ -52,3 +52,6 @@ class ShoppingListModel(Base):
     created_at = Column(DateTime(timezone=True), default=datetime.now(UTC))
     updated_at = Column(DateTime(timezone=True), default=datetime.now(UTC), onupdate=datetime.now(UTC))
     user = relationship("UserModel", back_populates="shopping_lists")
+
+# Export models
+__all__ = ['UserModel', 'ShoppingListModel', 'Base']

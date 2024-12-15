@@ -2,10 +2,10 @@ import logging
 import sys
 import time
 from typing import AsyncGenerator, Optional, Tuple
+
 from sqlalchemy import create_engine, text
-from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker, declarative_base  # Added this import
 from sqlalchemy.exc import OperationalError
 
 from app.core.config import get_settings
@@ -13,6 +13,7 @@ from app.core.logging import logger
 
 settings = get_settings()
 
+# Create the declarative base
 Base = declarative_base()
 
 def get_engine():
@@ -33,8 +34,20 @@ def get_session_maker():
         bind=get_engine()
     )
 
+# Add Async support
+async_engine = create_async_engine(
+    settings.sync_database_url.replace('postgresql://', 'postgresql+asyncpg://'),
+    echo=True,
+)
+
+# Use sessionmaker directly with AsyncSession
+async_session = sessionmaker(
+    async_engine, 
+    class_=AsyncSession, 
+    expire_on_commit=False
+)
+
 async def init_db(retries=5, delay=5) -> Tuple[object, object]:
-    """Initialize database connection with retries."""
     last_exception = None
     
     for attempt in range(retries):
@@ -68,13 +81,9 @@ async def init_db(retries=5, delay=5) -> Tuple[object, object]:
     logger.error("Max retries reached, cannot connect to database")
     raise last_exception
 
-def get_db():
-    """Dependency for database session."""
-    db = None
-    try:
-        session_maker = get_session_maker()
-        db = session_maker()
-        yield db
-    finally:
-        if db is not None:
-            db.close()
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    async with async_session() as session:
+        try:
+            yield session
+        finally:
+            await session.close()

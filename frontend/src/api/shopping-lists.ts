@@ -2,16 +2,21 @@ import apiClient from '@/utils/api';
 import type { ShoppingList, CreateShoppingListData, UpdateShoppingListData } from '@/types/shopping';
 import axios from 'axios';
 
+export const getShoppingList = async (id: number): Promise<ShoppingList> => {
+  const response = await apiClient.get(`/users/me/shopping-lists/${id}`);
+  return response.data;
+};
+
 export const getShoppingLists = async (): Promise<ShoppingList[]> => {
   try {
     // Add debug logging
     console.log('📋 Fetching shopping lists...');
-    console.log('🔑 Current auth token:', localStorage.getItem('auth-token'));
+    // console.log('🔑 Current auth token:', localStorage.getItem('auth-token'));
 
     const response = await apiClient.get('/users/me/shopping-lists');
     console.log('📋 Shopping lists response:', response.data);
     return response.data;
-  } catch (error: unknown) {
+  } catch (error) {
     if (axios.isAxiosError(error)) {
       console.error('❌ Shopping lists error details:', {
         message: error.message,

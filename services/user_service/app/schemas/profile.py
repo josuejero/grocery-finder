@@ -1,22 +1,26 @@
-from typing import List, Optional
-from pydantic import BaseModel, EmailStr, ConfigDict
+# services/user_service/app/schemas/profile.py
+from typing import Optional, Dict, Any, List
+from pydantic import BaseModel, EmailStr
 
-class UserBase(BaseModel):
+class UserProfile(BaseModel):
     username: str
     email: EmailStr
     full_name: Optional[str] = None
-
-class UserProfile(UserBase):
-    preferences: dict = {}
+    preferences: Dict[str, Any] = {}
     favorite_stores: List[str] = []
-    model_config = ConfigDict(from_attributes=True)
+    
+    class Config:
+        from_attributes = True
 
 class UserPreferencesUpdate(BaseModel):
-    preferences: dict
-    model_config = ConfigDict(from_attributes=True)
+    preferences: Dict[str, Any]
+    
+    class Config:
+        from_attributes = True
 
 class UserProfileUpdate(BaseModel):
-    email: Optional[EmailStr] = None
     full_name: Optional[str] = None
-    favorite_stores: Optional[List[str]] = None
-    model_config = ConfigDict(from_attributes=True)
+    preferences: Optional[Dict[str, Any]] = None
+    
+    class Config:
+        from_attributes = True
