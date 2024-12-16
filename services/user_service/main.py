@@ -22,7 +22,14 @@ from app.db.database import init_db
 settings = get_settings()
 logger = setup_logging()
 
+import signal
 
+def signal_handler(signum, frame):
+    logger.info(f"Received signal {signum}")
+    raise SystemExit(0)
+
+signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -105,6 +112,23 @@ async def health_check():
             "error": str(e),
             "traceback": traceback.format_exc()
         }
+        
+@app.get("/health")
+async def health_check():
+    try:
+        # For services using MongoDB
+        await app.mongodb.command("ping")
+        return {
+            "status": "healthy",
+            "timestamp": datetime.now(UTC).isoformat(),
+            "database": "connected"
+        }
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(e)
+        )
 
 # Run the User Service
 if __name__ == "__main__":

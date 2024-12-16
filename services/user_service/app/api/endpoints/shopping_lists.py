@@ -1,4 +1,6 @@
-from datetime import datetime, UTC
+# services/user_service/app/api/endpoints/shopping_lists.py
+
+from datetime import datetime, timezone
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -13,9 +15,9 @@ from app.schemas.shopping_list import (
 )
 from app.api.dependencies import get_current_user
 
-router = APIRouter(tags=["shopping_lists"])
+router = APIRouter()
 
-@router.post("/users/me/shopping-lists", response_model=ShoppingList)
+@router.post("/", response_model=ShoppingList)
 async def create_shopping_list(
     shopping_list: ShoppingListCreate,
     current_user: UserModel = Depends(get_current_user),
@@ -26,7 +28,7 @@ async def create_shopping_list(
         new_list = ShoppingListModel(
             user_id=current_user.id,
             name=shopping_list.name,
-            items=shopping_list.model_dump()["items"]
+            items=shopping_list.items  # Assuming 'items' is a list/dict
         )
         
         db.add(new_list)
@@ -43,7 +45,7 @@ async def create_shopping_list(
             detail=str(e)
         )
 
-@router.get("/users/me/shopping-lists")
+@router.get("/", response_model=List[ShoppingList])
 async def get_shopping_lists(
     current_user: UserModel = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -63,7 +65,8 @@ async def get_shopping_lists(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
-@router.get("/users/me/shopping-lists/{list_id}", response_model=ShoppingList)
+
+@router.get("/{list_id}", response_model=ShoppingList)
 async def get_shopping_list(
     list_id: int,
     current_user: UserModel = Depends(get_current_user),
@@ -83,7 +86,7 @@ async def get_shopping_list(
     
     return shopping_list
 
-@router.put("/users/me/shopping-lists/{list_id}", response_model=ShoppingList)
+@router.put("/{list_id}", response_model=ShoppingList)
 async def update_shopping_list(
     list_id: int,
     shopping_list_update: ShoppingListUpdate,
@@ -107,7 +110,7 @@ async def update_shopping_list(
         for field, value in update_data.items():
             setattr(shopping_list, field, value)
         
-        shopping_list.updated_at = datetime.now(UTC)
+        shopping_list.updated_at = datetime.now(timezone.utc)
         db.commit()
         db.refresh(shopping_list)
         
@@ -122,7 +125,7 @@ async def update_shopping_list(
             detail=str(e)
         )
 
-@router.delete("/users/me/shopping-lists/{list_id}")
+@router.delete("/{list_id}")
 async def delete_shopping_list(
     list_id: int,
     current_user: UserModel = Depends(get_current_user),
@@ -142,7 +145,7 @@ async def delete_shopping_list(
             )
         
         shopping_list.is_active = False
-        shopping_list.updated_at = datetime.now(UTC)
+        shopping_list.updated_at = datetime.now(timezone.utc)
         db.commit()
         
         return {

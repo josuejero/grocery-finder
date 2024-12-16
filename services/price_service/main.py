@@ -12,6 +12,17 @@ from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel
+import asyncio
+from tenacity import retry, stop_after_attempt, wait_exponential
+import signal
+
+def signal_handler(signum, frame):
+    logger.info(f"Received signal {signum}")
+    raise SystemExit(0)
+
+signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
+
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -32,6 +43,36 @@ app.add_middleware(
 
 MONGODB_URL = os.getenv("MONGODB_URL")
 MONGODB_DATABASE = os.getenv("MONGODB_DATABASE", "grocery_finder")
+
+@retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=4, max=10)
+)
+async def connect_to_mongo():
+    client = AsyncIOMotorClient(
+        MONGODB_URL,
+        serverSelectionTimeoutMS=5000,
+        connectTimeoutMS=5000
+    )
+    await client.admin.command('ping')
+    return client
+
+@app.on_event("startup")
+async def startup_db_client():
+    try:
+        app.mongodb_client = await connect_to_mongo()
+        app.mongodb = app.mongodb_client[MONGODB_DATABASE]
+        logger.info("Successfully connected to MongoDB")
+        await setup_indexes()
+    except Exception as e:
+        logger.error(f"Failed to connect to MongoDB: {e}")
+        raise
+
+@app.on_event("shutdown")
+async def shutdown_db_client():
+    if hasattr(app, 'mongodb_client'):
+        app.mongodb_client.close()
+        logger.info("Closed MongoDB connection")
 
 class PriceEntry(BaseModel):
     store_id: str
@@ -198,6 +239,23 @@ async def search_products(query: str):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to search products",
+        )
+
+@app.get("/health")
+async def health_check():
+    try:
+        # For services using MongoDB
+        await app.mongodb.command("ping")
+        return {
+            "status": "healthy",
+            "timestamp": datetime.now(UTC).isoformat(),
+            "database": "connected"
+        }
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(e)
         )
 
 if __name__ == "__main__":

@@ -1,5 +1,7 @@
-from datetime import datetime, UTC
-from fastapi import APIRouter, Depends, HTTPException, status, Header, Query
+# services/user_service/app/api/endpoints/profiles.py
+
+from datetime import datetime, timezone
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 import httpx
 
@@ -11,15 +13,15 @@ from app.schemas.profile import UserProfile, UserPreferencesUpdate, UserProfileU
 from app.api.dependencies import get_current_user, verify_token
 
 settings = Settings()
-router = APIRouter(tags=["profiles"])
+router = APIRouter()
 
-@router.get("/users/me", response_model=UserProfile)
+@router.get("/me", response_model=UserProfile)
 async def get_user_profile(
     current_user: UserModel = Depends(get_current_user)
 ):
     return current_user
 
-@router.put("/users/me", response_model=UserProfile)
+@router.put("/me", response_model=UserProfile)
 async def update_user_profile(
     profile_update: UserProfileUpdate,
     current_user: UserModel = Depends(get_current_user),
@@ -29,7 +31,7 @@ async def update_user_profile(
         for field, value in profile_update.model_dump(exclude_unset=True).items():
             setattr(current_user, field, value)
         
-        current_user.updated_at = datetime.now(UTC)
+        current_user.updated_at = datetime.now(timezone.utc)
         db.commit()
         db.refresh(current_user)
         
@@ -42,7 +44,7 @@ async def update_user_profile(
             detail=str(e)
         )
 
-@router.put("/users/me/preferences")
+@router.put("/me/preferences")
 async def update_preferences(
     preferences: UserPreferencesUpdate,
     current_user: UserModel = Depends(get_current_user),
@@ -50,7 +52,7 @@ async def update_preferences(
 ):
     try:
         current_user.preferences = preferences.preferences
-        current_user.updated_at = datetime.now(UTC)
+        current_user.updated_at = datetime.now(timezone.utc)
         db.commit()
         return {
             "status": "success",
@@ -64,10 +66,10 @@ async def update_preferences(
             detail=str(e)
         )
 
-@router.post("/users/sync", response_model=UserProfile)
+@router.post("/sync", response_model=UserProfile)
 async def sync_user(
-    username: str = Query(..., description="Username to sync"),
-    authorization: str = Header(...),
+    username: str,
+    authorization: str = Depends(),
     db: Session = Depends(get_db)
 ):
     try:

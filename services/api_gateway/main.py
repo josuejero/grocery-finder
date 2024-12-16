@@ -6,28 +6,19 @@ from typing import Dict, Optional
 import httpx
 import jwt
 import redis.asyncio as redis 
-from fastapi import Depends, FastAPI, HTTPException, Request, status, Header, BackgroundTasks
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from prometheus_client import Counter, Histogram
-from pydantic import BaseModel, EmailStr
-from pathlib import Path
-import traceback
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, status, Header, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-import logging
-import os
-import sys
-from datetime import datetime
-from fastapi import FastAPI, Request, HTTPException, Header, BackgroundTasks
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-import httpx
-import jwt
-from pydantic import BaseModel
-from typing import Dict
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from pydantic import BaseSettings
+
+import signal
+
+def signal_handler(signum, frame):
+    logger.info(f"Received signal {signum}")
+    raise SystemExit(0)
+
+signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
 
 # Create log directory if it doesn't exist
 log_dir = Path("/var/log/api_gateway")
@@ -36,21 +27,25 @@ log_dir.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s",
-    handlers=[
-        logging.FileHandler("/var/log/api_gateway/api_gateway.log"),
-        logging.StreamHandler(sys.stdout)
-    ],
+    handlers=[logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger(__name__)
 
-class Settings(BaseModel):
-    AUTH_SERVICE_URL: str = "http://localhost:8001"  # Updated to point to correct service
-    USER_SERVICE_URL: str = "http://localhost:8002"
-    PRICE_SERVICE_URL: str = "http://localhost:8003"
+class Settings(BaseSettings):
+    AUTH_SERVICE_URL: str = "http://auth_service:8000"
+    USER_SERVICE_URL: str = "http://user_service:8000" 
+    PRICE_SERVICE_URL: str = "http://price_service:8000"
     JWT_SECRET_KEY: str
     JWT_ALGORITHM: str = "HS256"
     RATE_LIMIT_PER_MINUTE: int = 60
-    REDIS_URL: str = "redis://localhost:6379"
+    REDIS_URL: str = "redis://redis:6379"
+
+    class Config:
+        env_file = ".env"
+
+settings = Settings()
+
+
 
 def get_settings() -> Settings:
     required_vars = ["JWT_SECRET_KEY"]
@@ -68,7 +63,6 @@ def get_settings() -> Settings:
         REDIS_URL=os.getenv("REDIS_URL", "redis://localhost:6379"),
     )
 
-settings = get_settings()
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -105,16 +99,18 @@ REQUEST_COUNT = Counter("http_requests_total", "Total HTTP requests", ["method",
 REQUEST_LATENCY = Histogram("http_request_duration_seconds", "HTTP request latency", ["endpoint"])
 RATE_LIMIT_COUNTER = Counter("rate_limit_hits_total", "Total number of rate limit triggers", ["client_ip"])
 
-app = FastAPI(title="Grocery Finder API Gateway")
+app = FastAPI(title="API Gateway")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Allow your frontend origin
+    allow_origins=["http://localhost:3000"],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["Authorization"],
 )
+
+redis_client = None
+
 
 def get_required_env_var(key: str) -> str:
     value = os.getenv(key)
@@ -147,12 +143,11 @@ async def startup_event():
     global redis_client
     logger.info("Starting API Gateway")
     try:
-        logger.debug(f"Connecting to Redis at {REDIS_URL}")
+        logger.debug(f"Connecting to Redis at {settings.REDIS_URL}")
         redis_client = redis.from_url(
-            REDIS_URL,
+            settings.REDIS_URL,
             encoding="utf-8",
-            decode_responses=True,
-            socket_connect_timeout=5.0
+            decode_responses=True
         )
         await redis_client.ping()
         logger.info("Successfully connected to Redis")
@@ -624,7 +619,22 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     logger.error(f"Unhandled Exception: {exc}")
     return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
 
-
+@app.get("/health")
+async def health_check():
+    try:
+        # For services using MongoDB
+        await app.mongodb.command("ping")
+        return {
+            "status": "healthy",
+            "timestamp": datetime.now(UTC).isoformat(),
+            "database": "connected"
+        }
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(e)
+        )
 
 from fastapi.responses import JSONResponse
 if __name__ == "__main__":

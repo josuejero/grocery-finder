@@ -1,11 +1,13 @@
+# services/user_service/app/core/database.py
+
 import logging
 import sys
 import time
-from typing import AsyncGenerator, Optional, Tuple
+from typing import AsyncGenerator, Tuple
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker, declarative_base  # Added this import
+from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.exc import OperationalError
 
 from app.core.config import get_settings

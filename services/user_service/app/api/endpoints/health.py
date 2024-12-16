@@ -1,25 +1,29 @@
 # services/user_service/app/api/endpoints/health.py
 
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
 from app.db.database import get_db
 from app.core.logging import logger
+import tracemalloc
+
+# Start tracemalloc for detailed traceback information (optional)
+tracemalloc.start()
 
 router = APIRouter(tags=["health"])
 
 @router.get("/health")
-async def health_check(db: Session = Depends(get_db)):
+async def health_check(db: AsyncSession = Depends(get_db)):
     try:
         # Test database connection
-        db.execute(text("SELECT 1"))
+        await db.execute(text("SELECT 1"))
         
         # Return detailed health information
         return {
             "status": "healthy",
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "database": "connected",
             "service": "user_service",
             "version": "1.0.0"

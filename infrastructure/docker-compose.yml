@@ -87,6 +87,12 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      user_service:
+        condition: service_healthy
+      price_service:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health || exit 1"]
       interval: 30s
